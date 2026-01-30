@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   # API 服务
   api:
@@ -12,51 +10,6 @@ services:
     volumes:
       - ./configs:/root/configs
       - ./logs:/root/logs
-    depends_on:
-      - mysql
     restart: unless-stopped
     networks:
       - apiwong-network
-
-  # MySQL 数据库（系统数据库）
-  mysql:
-    image: mysql:8.0
-    container_name: apiwong-mysql
-    environment:
-      MYSQL_ROOT_PASSWORD: password
-      MYSQL_DATABASE: apiwong
-      TZ: Asia/Shanghai
-    ports:
-      - "3306:3306"
-    volumes:
-      - mysql-data:/var/lib/mysql
-    command: --default-authentication-plugin=mysql_native_password --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
-    restart: unless-stopped
-    networks:
-      - apiwong-network
-
-  # PostgreSQL 数据库（示例）
-  postgres:
-    image: postgres:15-alpine
-    container_name: apiwong-postgres
-    environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: password
-      POSTGRES_DB: testdb
-      TZ: Asia/Shanghai
-    ports:
-      - "5432:5432"
-    volumes:
-      - postgres-data:/var/lib/postgresql/data
-    restart: unless-stopped
-    networks:
-      - apiwong-network
-
-volumes:
-  mysql-data:
-  postgres-data:
-
-
-networks:
-  apiwong-network:
-    driver: bridge

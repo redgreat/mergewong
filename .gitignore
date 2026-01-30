@@ -39,3 +39,4 @@ Thumbs.db
 configs/config.yaml
 doc/*
 script/*
+web/node_modules

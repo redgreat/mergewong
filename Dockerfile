@@ -1,5 +1,15 @@
 # 构建阶段
-FROM golang:1.21-alpine AS builder
+FROM node:25-alpine AS web-builder
+
+WORKDIR /web
+
+COPY web/package*.json ./
+RUN npm install
+
+COPY web/ .
+RUN npm run build
+
+FROM golang:1.25.6-alpine AS builder
 
 # 设置工作目录
 WORKDIR /app
@@ -34,6 +44,7 @@ WORKDIR /root/
 # 从构建阶段复制二进制文件
 COPY --from=builder /app/apiwong .
 COPY --from=builder /app/configs ./configs
+COPY --from=web-builder /web/dist ./web/dist
 
 # 暴露端口
 EXPOSE 8080
