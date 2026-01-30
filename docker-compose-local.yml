@@ -1,0 +1,23 @@
+version: '3.8'
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: DockerfileLocal
+    image: apiwong:local
+    container_name: apiwong-api-local
+    ports:
+      - "8080:8080"
+    environment:
+      - TZ=Asia/Shanghai
+    volumes:
+      - ./configs:/root/configs
+      - ./logs:/root/logs
+    restart: unless-stopped
+    networks:
+      - apiwong-local-network
+
+networks:
+  apiwong-local-network:
+    driver: bridge

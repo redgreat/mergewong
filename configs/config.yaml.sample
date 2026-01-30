@@ -1,0 +1,60 @@
+server:
+  port: "8080"
+  mode: "debug" # debug, release, test
+
+jwt:
+  secret: "xxx"
+  expire_time: 24 # JWT 过期时间（小时）
+
+# 系统数据库（存储用户、任务配置等）
+databases:
+  system:
+    type: "mysql"
+    host: "localhost"
+    port: 3306
+    database: "apiwong"
+    username: "xxx"
+    password: "xxx"
+    charset: "utf8mb4"
+    max_idle: 10
+    max_open: 100
+
+  # 示例：PostgreSQL 数据库
+  # postgres_db:
+  #   type: "postgres"
+  #   host: "localhost"
+  #   port: 5432
+  #   database: "testdb"
+  #   username: "postgres"
+  #   password: "password"
+  #   charset: "utf8"
+  #   max_idle: 10
+  #   max_open: 100
+
+  # 示例：SQL Server 数据库
+  # sqlserver_db:
+  #   type: "sqlserver"
+  #   host: "localhost"
+  #   port: 1433
+  #   database: "testdb"
+  #   username: "sa"
+  #   password: "YourPassword123"
+  #   charset: "utf8"
+  #   max_idle: 10
+  #   max_open: 100
+
+  # 示例：Oracle 数据库
+  # oracle_db:
+  #   type: "oracle"
+  #   host: "localhost"
+  #   port: 1521
+  #   database: "ORCL"
+  #   username: "system"
+  #   password: "oracle"
+  #   charset: "utf8"
+  #   max_idle: 10
+  #   max_open: 100
+
+log:
+  level: "info" # debug, info, warn, error
+  output_path: "logs/app.log"
