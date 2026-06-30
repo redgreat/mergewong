@@ -15,7 +15,7 @@
 <aside class="sidebar" class:collapsed={sidebarCollapsed}>
   <div class="brand-block">
     <div class="brand-row">
-      <div class="brand"><span class="brand-mark">M</span><span class="brand-name">MergeWong</span></div>
+      <div class="brand"><span class="brand-mark"><img src="/favicon.png" alt="logo" width="24" height="24" style="border-radius:6px;display:block;" /></span><span class="brand-name">数据同步</span></div>
       <button class="icon-button sidebar-toggle" aria-label={sidebarCollapsed ? "展开侧栏" : "收起侧栏"} title={sidebarCollapsed ? "展开侧栏" : "收起侧栏"} on:click={toggleSidebar}>
         {#if sidebarCollapsed}<PanelLeftOpen size={18} />{:else}<PanelLeftClose size={18} />{/if}
       </button>
