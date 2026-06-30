@@ -1,4 +1,5 @@
 <script>
+  import { Database } from "lucide-svelte";
   export let connections = [];
   export let connectionPage = 1;
   export let connectionPageSize = 10;
@@ -9,17 +10,17 @@
   export let onEdit = (c) => {};
   export let onTest = (c) => {};
   export let onDelete = (c) => {};
+  export let canManage = false;
 </script>
 
-<section class="card">
+<section class="workspace-panel">
   <div class="card-header">
     <div>
-      <h2>连接列表</h2>
-      <p>维护系统可用的数据库连接</p>
+      <h2>数据库连接</h2>
     </div>
     <div class="header-actions">
-      <span class="pill">总数 {connectionTotal}</span>
-      <button on:click={onOpenNew}>新增连接</button>
+      <span class="record-count">共 {connectionTotal} 个连接</span>
+      {#if canManage}<button on:click={onOpenNew}>新增连接</button>{/if}
     </div>
   </div>
   <table class="data-table">
@@ -31,7 +32,7 @@
         <th>数据库</th>
         <th>用户</th>
         <th>状态</th>
-        <th>操作</th>
+        {#if canManage}<th>操作</th>{/if}
       </tr>
     </thead>
     <tbody>
@@ -47,13 +48,16 @@
               {connection.status === 1 ? "启用" : "禁用"}
             </span>
           </td>
-          <td class="row-actions">
+          {#if canManage}<td class="row-actions">
             <button class="ghost" on:click={() => onEdit(connection)}>编辑</button>
             <button class="ghost" on:click={() => onTest(connection)}>测试</button>
             <button class="danger" on:click={() => onDelete(connection)}>删除</button>
-          </td>
+          </td>{/if}
         </tr>
       {/each}
+      {#if connections.length === 0}
+        <tr class="empty-row"><td colspan={canManage ? 7 : 6}><div class="empty-state"><span class="empty-icon"><Database size={24} /></span><strong>还没有数据库连接</strong>{#if canManage}<button on:click={onOpenNew}>新增连接</button>{/if}</div></td></tr>
+      {/if}
     </tbody>
   </table>
   <div class="pager">

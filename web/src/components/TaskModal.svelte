@@ -15,7 +15,6 @@
       <div class="modal-header">
         <div>
           <h3>{editing ? "编辑同步任务" : "新增同步任务"}</h3>
-          <p>支持 Cron 定时与字段映射</p>
         </div>
         <button class="ghost icon" on:click={onClose}>✕</button>
       </div>

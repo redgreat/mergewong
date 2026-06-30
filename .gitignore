@@ -5,6 +5,7 @@
 *.so
 *.dylib
 apiwong
+mergewong
 server
 
 # Test binary, built with `go test -c`
@@ -37,6 +38,9 @@ configs/config.local.yaml
 .DS_Store
 Thumbs.db
 configs/config.yaml
-doc/*
-script/*
+.env
+# Project documentation is source and must be versioned.
+# Keep generated/private files out with explicit patterns instead of ignoring doc/.
+# Operational scripts are versioned source files.
 web/node_modules
+tmp/

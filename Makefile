@@ -1,4 +1,4 @@
-.PHONY: help build run clean docker-build docker-up docker-down test
+.PHONY: help build run clean docker-build docker-up docker-down docker-logs test
 
 help: ## 显示帮助信息
 	@echo "可用命令："
@@ -6,7 +6,7 @@ help: ## 显示帮助信息
 
 build: ## 编译应用
 	@echo "编译应用..."
-	go build -o apiwong ./cmd/server
+	go build -o mergewong ./cmd/server
 
 run: ## 运行应用
 	@echo "运行应用..."
@@ -14,7 +14,7 @@ run: ## 运行应用
 
 clean: ## 清理编译产物
 	@echo "清理编译产物..."
-	rm -f apiwong
+	rm -f mergewong
 	rm -rf logs/*.log
 
 test: ## 运行测试
@@ -27,19 +27,19 @@ tidy: ## 整理依赖
 
 docker-build: ## 构建 Docker 镜像
 	@echo "构建 Docker 镜像..."
-	docker build -t apiwong:latest .
+	docker build -t mergewong:latest .
 
 docker-up: ## 启动 Docker Compose
 	@echo "启动 Docker Compose..."
-	docker-compose up -d
+	docker compose -f docker-compose-local.yml up -d --build
 
 docker-down: ## 停止 Docker Compose
 	@echo "停止 Docker Compose..."
-	docker-compose down
+	docker compose -f docker-compose-local.yml down
 
 docker-logs: ## 查看 Docker 日志
 	@echo "查看 Docker 日志..."
-	docker-compose logs -f api
+	docker compose -f docker-compose-local.yml logs -f app
 
 lint: ## 运行代码检查
 	@echo "运行代码检查..."

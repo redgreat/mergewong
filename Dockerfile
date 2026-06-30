@@ -1,53 +1,37 @@
-# 构建阶段
-FROM node:25-alpine AS web-builder
-
-WORKDIR /web
-
-COPY web/package*.json ./
-RUN npm install
-
-COPY web/ .
+# syntax=docker/dockerfile:1.7
+FROM node:20-alpine AS web-builder
+WORKDIR /src/web
+COPY web/package.json web/package-lock.json ./
+RUN --mount=type=cache,target=/root/.npm npm ci --no-audit
+COPY web/ ./
 RUN npm run build
 
-FROM golang:1.25.6-alpine AS builder
-
-# 设置工作目录
-WORKDIR /app
-
-# 安装必要的构建工具
-RUN apk add --no-cache git
-
-# 复制 go.mod 和 go.sum
+FROM golang:1.25-alpine AS go-builder
+WORKDIR /src
 COPY go.mod go.sum ./
+RUN --mount=type=cache,target=/go/pkg/mod go mod download
+COPY cmd ./cmd
+COPY internal ./internal
+RUN --mount=type=cache,target=/root/.cache/go-build \
+    CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/mergewong ./cmd/server
 
-# 下载依赖
-RUN go mod download
-
-# 复制源代码
-COPY . .
-
-# 构建应用
-RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o apiwong ./cmd/server
-
-# 运行阶段
-FROM alpine:latest
-
-# 安装 ca-certificates（用于 HTTPS 请求）
-RUN apk --no-cache add ca-certificates tzdata
-
-# 设置时区
+FROM alpine:3.22
+ARG VERSION=dev
+ARG COMMIT=unknown
+ARG BUILD_TIME=unknown
+LABEL org.opencontainers.image.title="MergeWong" \
+      org.opencontainers.image.description="Lightweight database table synchronization service" \
+      org.opencontainers.image.version="$VERSION" \
+      org.opencontainers.image.revision="$COMMIT" \
+      org.opencontainers.image.created="$BUILD_TIME" \
+      org.opencontainers.image.source="https://github.com/redgreat/mergewong"
+RUN apk add --no-cache ca-certificates tzdata wget
 ENV TZ=Asia/Shanghai
-
-# 创建工作目录
-WORKDIR /root/
-
-# 从构建阶段复制二进制文件
-COPY --from=builder /app/apiwong .
-COPY --from=builder /app/configs ./configs
-COPY --from=web-builder /web/dist ./web/dist
-
-# 暴露端口
+WORKDIR /app
+COPY --from=go-builder /out/mergewong ./mergewong
+COPY --from=web-builder /src/web/dist ./web/dist
+RUN mkdir -p /app/configs /app/logs
 EXPOSE 8080
-
-# 运行应用
-CMD ["./apiwong"]
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+  CMD wget -qO- http://127.0.0.1:8080/health || exit 1
+ENTRYPOINT ["./mergewong"]

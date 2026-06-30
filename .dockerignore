@@ -1,0 +1,14 @@
+.git
+.github
+.idea
+.vscode
+example
+doc
+logs
+script
+web/node_modules
+web/dist
+configs/config.yaml
+*.log
+apiwong
+mergewong

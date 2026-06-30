@@ -1,5 +1,5 @@
 <script>
-  import { onDestroy, onMount } from "svelte";
+  import { onMount } from "svelte";
   import { request } from "./api.js";
   import Sidebar from "./components/Sidebar.svelte";
   import Topbar from "./components/Topbar.svelte";
@@ -9,15 +9,22 @@
   import LogsPage from "./pages/LogsPage.svelte";
   import ConnectionModal from "./components/ConnectionModal.svelte";
   import TaskModal from "./components/TaskModal.svelte";
+  import UserModal from "./components/UserModal.svelte";
+  import PasswordModal from "./components/PasswordModal.svelte";
+  import UsersPage from "./pages/UsersPage.svelte";
 
   let apiError = "";
   let apiInfo = "";
   let token = localStorage.getItem("token") || "";
+  let currentUser = JSON.parse(localStorage.getItem("current-user") || "null") || {};
   let view = token ? "connections" : "login";
-  let sidebarCollapsed = false;
-  let sidebarManual = false;
+  let sidebarCollapsed = localStorage.getItem("sidebar-expanded") !== "true";
+  let theme = localStorage.getItem("theme") || "dark";
   let showConnectionModal = false;
   let showTaskModal = false;
+  let showUserModal = false;
+  let showPasswordModal = false;
+  $: isAdmin = currentUser.role === "admin";
 
   let loginForm = {
     username: "",
@@ -67,31 +74,32 @@
   let logPageSize = 10;
   let logTotal = 0;
 
-  function applySidebarState() {
-    if (!sidebarManual) {
-      sidebarCollapsed = window.innerWidth < 1100;
-    }
-    if (window.innerWidth >= 1100) {
-      sidebarManual = false;
-    }
-  }
+  let users = [];
+  let userPage = 1;
+  let userPageSize = 10;
+  let userTotal = 0;
+  let editingUserId = null;
+  let userForm = { username: "", password: "", email: "", role: "viewer", status: 1 };
+  let passwordForm = { current_password: "", new_password: "", confirm_password: "" };
 
   function toggleSidebar() {
     sidebarCollapsed = !sidebarCollapsed;
-    sidebarManual = true;
+    localStorage.setItem("sidebar-expanded", String(!sidebarCollapsed));
+  }
+
+  function toggleTheme() {
+    theme = theme === "dark" ? "light" : "dark";
+    localStorage.setItem("theme", theme);
+    document.documentElement.dataset.theme = theme;
   }
 
   onMount(() => {
     if (token) {
+      loadProfile();
       loadConnections();
       loadTasks();
     }
-    applySidebarState();
-    window.addEventListener("resize", applySidebarState);
-  });
-
-  onDestroy(() => {
-    window.removeEventListener("resize", applySidebarState);
+    document.documentElement.dataset.theme = theme;
   });
 
   function setMessage(message, type) {
@@ -108,6 +116,8 @@
       });
       token = data.token;
       localStorage.setItem("token", token);
+      currentUser = { id: data.user_id, username: data.username, role: data.role };
+      localStorage.setItem("current-user", JSON.stringify(currentUser));
       view = "connections";
       await loadConnections();
       await loadTasks();
@@ -119,10 +129,83 @@
   function logout() {
     token = "";
     localStorage.removeItem("token");
+    localStorage.removeItem("current-user");
+    currentUser = {};
     view = "login";
     connections = [];
     tasks = [];
     logs = [];
+    users = [];
+  }
+
+  async function loadProfile() {
+    try {
+      currentUser = await request("/api/profile", { token });
+      localStorage.setItem("current-user", JSON.stringify(currentUser));
+    } catch (error) {
+      logout();
+    }
+  }
+
+  async function loadUsers() {
+    if (!isAdmin) return;
+    try {
+      const data = await request("/api/users", { token, params: { page: userPage, page_size: userPageSize } });
+      users = data.data;
+      userTotal = data.total;
+    } catch (error) { setMessage(error.message, "error"); }
+  }
+
+  function resetUserForm() {
+    editingUserId = null;
+    userForm = { username: "", password: "", email: "", role: "viewer", status: 1 };
+  }
+
+  function openUserModal(user = null) {
+    if (user) {
+      editingUserId = user.id;
+      userForm = { username: user.username, password: "", email: user.email || "", role: user.role, status: user.status };
+    } else resetUserForm();
+    showUserModal = true;
+  }
+
+  function closeUserModal() { showUserModal = false; resetUserForm(); }
+
+  async function saveUser() {
+    try {
+      const wasEditing = !!editingUserId;
+      const payload = { email: userForm.email.trim(), role: userForm.role, status: Number(userForm.status) };
+      if (editingUserId) {
+        await request(`/api/users/${editingUserId}`, { method: "PUT", token, body: payload });
+      } else {
+        await request("/api/users", { method: "POST", token, body: { ...payload, username: userForm.username.trim(), password: userForm.password } });
+      }
+      closeUserModal(); setMessage(wasEditing ? "用户已更新" : "用户已创建", "info"); await loadUsers();
+    } catch (error) { setMessage(error.message, "error"); }
+  }
+
+  async function deleteUser(user) {
+    if (!window.confirm(`确认删除用户 ${user.username} 吗？`)) return;
+    try { await request(`/api/users/${user.id}`, { method: "DELETE", token }); setMessage("用户已删除", "info"); await loadUsers(); }
+    catch (error) { setMessage(error.message, "error"); }
+  }
+
+  function openPasswordModal() {
+    passwordForm = { current_password: "", new_password: "", confirm_password: "" };
+    showPasswordModal = true;
+  }
+
+  async function changePassword() {
+    if (passwordForm.new_password !== passwordForm.confirm_password) { setMessage("两次输入的新密码不一致", "error"); return; }
+    try {
+      await request("/api/profile/password", { method: "PUT", token, body: { current_password: passwordForm.current_password, new_password: passwordForm.new_password } });
+      showPasswordModal = false; logout();
+    } catch (error) { setMessage(error.message, "error"); }
+  }
+
+  function changeView(nextView) {
+    if (nextView === "users") loadUsers();
+    view = nextView;
   }
 
   function resetConnectionForm() {
@@ -419,21 +502,21 @@
   }
 </script>
 
-<div class="layout">
+<div class="layout" data-theme={theme}>
   <Sidebar
     {token}
     {view}
-    setView={(v) => (view = v)}
+    setView={changeView}
     {connectionTotal}
     {taskTotal}
     {logTotal}
     {sidebarCollapsed}
     toggleSidebar={toggleSidebar}
-    logout={logout}
+    role={currentUser.role}
   />
 
   <main class="content">
-    <Topbar {view} {token} />
+    <Topbar {view} {token} {theme} user={currentUser} onToggleTheme={toggleTheme} onChangePassword={openPasswordModal} {logout} />
 
     {#if apiError}
       <div class="alert error">{apiError}</div>
@@ -446,6 +529,7 @@
       <LoginPage {loginForm} onLogin={login} />
     {:else if view === "connections"}
       <ConnectionsPage
+        canManage={isAdmin}
         {connections}
         {connectionPage}
         {connectionPageSize}
@@ -459,6 +543,7 @@
       />
     {:else if view === "tasks"}
       <TasksPage
+        canManage={isAdmin}
         {tasks}
         {taskPage}
         {taskPageSize}
@@ -482,6 +567,16 @@
         onPrev={() => { logPage -= 1; loadLogs(); }}
         onNext={() => { logPage += 1; loadLogs(); }}
       />
+    {:else if view === "users" && isAdmin}
+      <UsersPage
+        {users} {userPage} {userPageSize} {userTotal}
+        currentUserId={currentUser.id}
+        onPrev={() => { userPage -= 1; loadUsers(); }}
+        onNext={() => { userPage += 1; loadUsers(); }}
+        onOpenNew={() => openUserModal()}
+        onEdit={openUserModal}
+        onDelete={deleteUser}
+      />
     {/if}
 
     <ConnectionModal
@@ -499,6 +594,8 @@
       onClose={closeTaskModal}
       onSave={saveTask}
     />
+    <UserModal open={showUserModal} editing={!!editingUserId} form={userForm} onClose={closeUserModal} onSave={saveUser} />
+    <PasswordModal open={showPasswordModal} form={passwordForm} onClose={() => (showPasswordModal = false)} onSave={changePassword} />
   </main>
 </div>
 

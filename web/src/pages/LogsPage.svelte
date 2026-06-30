@@ -1,4 +1,19 @@
 <script>
+  import { ScrollText } from "lucide-svelte";
+  let taskQuery = "";
+  let resultsOpen = false;
+  $: filteredTasks = tasks.filter((task) => task.name.toLowerCase().includes(taskQuery.trim().toLowerCase())).slice(0, 8);
+
+  function chooseTask(task) {
+    logTaskId = task ? String(task.id) : "";
+    taskQuery = task ? task.name : "";
+    resultsOpen = false;
+    onChangeTask();
+  }
+
+  function handleWindowClick(event) {
+    if (!event.target.closest(".task-search")) resultsOpen = false;
+  }
   export let tasks = [];
   export let logTaskId = "";
   export let logs = [];
@@ -10,25 +25,27 @@
   export let onNext = () => {};
 </script>
 
-<section class="card">
+<svelte:window on:click={handleWindowClick} />
+
+<section class="workspace-panel">
   <div class="card-header">
     <div>
       <h2>同步日志</h2>
-      <p>查看每次同步执行结果</p>
     </div>
   </div>
   <div class="toolbar">
-    <label>
-      选择任务
-      <select bind:value={logTaskId} on:change={onChangeTask}>
-        <option value="">请选择</option>
-        {#each tasks as task}
-          <option value={task.id}>{task.name}</option>
-        {/each}
-      </select>
-    </label>
+    <div class="task-search">
+      <label>查询任务<input type="search" placeholder="输入任务名称" bind:value={taskQuery} on:focus={() => (resultsOpen = true)} /></label>
+      {#if resultsOpen}
+        <div class="search-results">
+          <button class:active={!logTaskId} on:click={() => chooseTask(null)}>全部任务</button>
+          {#each filteredTasks as task}<button class:active={String(task.id) === String(logTaskId)} on:click={() => chooseTask(task)}>{task.name}</button>{/each}
+          {#if filteredTasks.length === 0}<span>没有匹配任务</span>{/if}
+        </div>
+      {/if}
+    </div>
     <div class="toolbar-right">
-      <span class="pill">总数 {logTotal}</span>
+      <span class="record-count">共 {logTotal} 条记录</span>
     </div>
   </div>
   <table class="data-table">
@@ -55,6 +72,9 @@
           <td>{log.duration}</td>
         </tr>
       {/each}
+      {#if logs.length === 0}
+        <tr class="empty-row"><td colspan="5"><div class="empty-state"><span class="empty-icon"><ScrollText size={24} /></span><strong>暂无同步日志</strong></div></td></tr>
+      {/if}
     </tbody>
   </table>
   <div class="pager">

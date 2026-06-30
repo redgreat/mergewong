@@ -14,7 +14,6 @@
       <div class="modal-header">
         <div>
           <h3>{editing ? "编辑数据库连接" : "新增数据库连接"}</h3>
-          <p>保存后立即生效</p>
         </div>
         <button class="ghost icon" on:click={onClose}>✕</button>
       </div>

@@ -24,6 +24,9 @@ func (m *Migrator) Run(db *gorm.DB) error {
 	}
 
 	// 2. 自动迁移表结构
+	if err := m.migrateUserRoles(db); err != nil {
+		return fmt.Errorf("用户角色迁移失败: %w", err)
+	}
 	if err := m.migrateSchema(db); err != nil {
 		return fmt.Errorf("表结构迁移失败: %w", err)
 	}
@@ -37,6 +40,19 @@ func (m *Migrator) Run(db *gorm.DB) error {
 	log.Println("数据库初始化和迁移完成")
 	log.Println("========================================")
 	return nil
+}
+
+func (m *Migrator) migrateUserRoles(db *gorm.DB) error {
+	if db.Dialector.Name() != "postgres" || !db.Migrator().HasTable(&models.User{}) {
+		return nil
+	}
+	if err := db.Exec("UPDATE users SET role = 'viewer' WHERE role = 'user'").Error; err != nil {
+		return err
+	}
+	if err := db.Exec("ALTER TABLE users DROP CONSTRAINT IF EXISTS ck_users_role").Error; err != nil {
+		return err
+	}
+	return db.Exec("ALTER TABLE users ADD CONSTRAINT ck_users_role CHECK (role IN ('admin', 'viewer'))").Error
 }
 
 // checkConnection 检查数据库连接

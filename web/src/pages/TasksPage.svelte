@@ -1,4 +1,5 @@
 <script>
+  import { Workflow } from "lucide-svelte";
   export let tasks = [];
   export let taskPage = 1;
   export let taskPageSize = 10;
@@ -9,17 +10,17 @@
   export let onEdit = (t) => {};
   export let onExecute = (t) => {};
   export let onDelete = (t) => {};
+  export let canManage = false;
 </script>
 
-<section class="card">
+<section class="workspace-panel">
   <div class="card-header">
     <div>
-      <h2>任务列表</h2>
-      <p>管理全量与增量同步任务</p>
+      <h2>同步任务</h2>
     </div>
     <div class="header-actions">
-      <span class="pill">总数 {taskTotal}</span>
-      <button on:click={onOpenNew}>新增任务</button>
+      <span class="record-count">共 {taskTotal} 个任务</span>
+      {#if canManage}<button on:click={onOpenNew}>新增任务</button>{/if}
     </div>
   </div>
   <table class="data-table">
@@ -31,7 +32,7 @@
         <th>类型</th>
         <th>状态</th>
         <th>最近执行</th>
-        <th>操作</th>
+        {#if canManage}<th>操作</th>{/if}
       </tr>
     </thead>
     <tbody>
@@ -47,13 +48,16 @@
             </span>
           </td>
           <td>{task.last_run_status || "-"}</td>
-          <td class="row-actions">
+          {#if canManage}<td class="row-actions">
             <button class="ghost" on:click={() => onEdit(task)}>编辑</button>
             <button class="ghost" on:click={() => onExecute(task)}>执行</button>
             <button class="danger" on:click={() => onDelete(task)}>删除</button>
-          </td>
+          </td>{/if}
         </tr>
       {/each}
+      {#if tasks.length === 0}
+        <tr class="empty-row"><td colspan={canManage ? 7 : 6}><div class="empty-state"><span class="empty-icon"><Workflow size={24} /></span><strong>还没有同步任务</strong>{#if canManage}<button on:click={onOpenNew}>新增任务</button>{/if}</div></td></tr>
+      {/if}
     </tbody>
   </table>
   <div class="pager">

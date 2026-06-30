@@ -9,13 +9,13 @@ jwt:
 # 系统数据库（存储用户、任务配置等）
 databases:
   system:
-    type: "mysql"
+    type: "postgres"
     host: "localhost"
-    port: 3306
-    database: "apiwong"
-    username: "xxx"
-    password: "xxx"
-    charset: "utf8mb4"
+    port: 5432
+    database: "mergewong"
+    username: "mergewong"
+    password: "MergeWong@2026!" # 仅示例，生产环境必须修改
+    charset: "utf8"
     max_idle: 10
     max_open: 100
 

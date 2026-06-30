@@ -7,6 +7,8 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/redgreat/apiwong/internal/config"
+	"github.com/redgreat/apiwong/internal/database"
+	"github.com/redgreat/apiwong/internal/models"
 	"github.com/redgreat/apiwong/internal/utils"
 )
 
@@ -79,10 +81,23 @@ func AuthMiddleware() gin.HandlerFunc {
 			return
 		}
 
-		// 将用户信息存入上下文
-		c.Set("user_id", claims.UserID)
-		c.Set("username", claims.Username)
-		c.Set("role", claims.Role)
+		// 权限以数据库当前状态为准，确保禁用或角色调整立即生效。
+		db, dbErr := database.GetManager().GetConnection("system")
+		if dbErr != nil {
+			utils.Unauthorized(c, "无法验证用户状态")
+			c.Abort()
+			return
+		}
+		var user models.User
+		if err := db.First(&user, claims.UserID).Error; err != nil || user.Status != 1 {
+			utils.Unauthorized(c, "用户不存在或已被禁用")
+			c.Abort()
+			return
+		}
+
+		c.Set("user_id", user.ID)
+		c.Set("username", user.Username)
+		c.Set("role", user.Role)
 
 		c.Next()
 	}
