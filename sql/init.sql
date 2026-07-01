@@ -93,6 +93,7 @@ CREATE TABLE IF NOT EXISTS database_connections (
   deleted_at TIMESTAMPTZ NULL,
   name VARCHAR(50) NOT NULL,
   type VARCHAR(20) NOT NULL,
+  usage VARCHAR(20) NOT NULL DEFAULT 'both',
   host VARCHAR(100) NOT NULL,
   port BIGINT NOT NULL,
   "database" VARCHAR(100) NOT NULL,
@@ -103,7 +104,8 @@ CREATE TABLE IF NOT EXISTS database_connections (
   max_open BIGINT NOT NULL DEFAULT 100,
   status BIGINT NOT NULL DEFAULT 1,
   user_id BIGINT NOT NULL,
-  CONSTRAINT ck_database_connections_status CHECK (status IN (0, 1))
+  CONSTRAINT ck_database_connections_status CHECK (status IN (0, 1)),
+  CONSTRAINT ck_database_connections_usage CHECK (usage IN ('source', 'target', 'both'))
 );
 
 CREATE INDEX IF NOT EXISTS idx_database_connections_deleted_at
@@ -117,9 +119,27 @@ COMMENT ON TABLE database_connections IS '源库和目标库连接配置';
 COMMENT ON COLUMN database_connections.password IS '数据库密码（当前为明文）';
 
 -- ----------------------------------------------------------------------------
--- 5. 同步任务表
+-- 5. 企业微信预警发送方
+-- ----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS alert_channels (
+  id BIGSERIAL PRIMARY KEY,
+  created_at TIMESTAMPTZ NULL,
+  updated_at TIMESTAMPTZ NULL,
+  deleted_at TIMESTAMPTZ NULL,
+  name VARCHAR(100) NOT NULL,
+  robot_id VARCHAR(500) NOT NULL,
+  status BIGINT NOT NULL DEFAULT 1,
+  CONSTRAINT uk_alert_channels_name UNIQUE (name),
+  CONSTRAINT ck_alert_channels_status CHECK (status IN (0, 1))
+);
+
+CREATE INDEX IF NOT EXISTS idx_alert_channels_deleted_at ON alert_channels (deleted_at);
+COMMENT ON TABLE alert_channels IS '企业微信机器人预警发送方';
+
+-- ----------------------------------------------------------------------------
+-- 6. 同步任务表
 -- 对应 internal/models/sync_task.go
--- 当前 sync_type 支持 full / incremental；CDC 字段将在同步内核实现时迁移。
+-- sync_type: full / cdc / full_cdc。
 -- ----------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS sync_tasks (
   id BIGSERIAL PRIMARY KEY,
@@ -135,23 +155,60 @@ CREATE TABLE IF NOT EXISTS sync_tasks (
   sync_type VARCHAR(20) NOT NULL,
   incremental_key VARCHAR(100) NULL,
   cron_expression VARCHAR(100) NULL,
+  schedule_type VARCHAR(20) NOT NULL DEFAULT 'interval',
+  interval_minutes BIGINT NOT NULL DEFAULT 5,
   status BIGINT NOT NULL DEFAULT 1,
   last_run_at TIMESTAMPTZ NULL,
   last_run_status VARCHAR(20) NULL,
   last_run_message TEXT NULL,
+  last_success_at TIMESTAMPTZ NULL,
   user_id BIGINT NOT NULL,
-  CONSTRAINT ck_sync_tasks_sync_type CHECK (sync_type IN ('full', 'incremental')),
+  alert_channel_id BIGINT NULL REFERENCES alert_channels(id),
+  alert_delay_minutes BIGINT NOT NULL DEFAULT 0,
+  alert_stopped_minutes BIGINT NOT NULL DEFAULT 0,
+  alert_on_error BOOLEAN NOT NULL DEFAULT TRUE,
+  alert_cooldown_minutes BIGINT NOT NULL DEFAULT 30,
+  validation_status VARCHAR(20) NOT NULL DEFAULT 'legacy',
+  CONSTRAINT ck_sync_tasks_sync_type CHECK (sync_type IN ('full', 'cdc', 'full_cdc')),
   CONSTRAINT ck_sync_tasks_status CHECK (status IN (0, 1))
 );
 
 CREATE INDEX IF NOT EXISTS idx_sync_tasks_deleted_at ON sync_tasks (deleted_at);
 CREATE INDEX IF NOT EXISTS idx_sync_tasks_user_id ON sync_tasks (user_id);
 CREATE INDEX IF NOT EXISTS idx_sync_tasks_status ON sync_tasks (status);
+CREATE INDEX IF NOT EXISTS idx_sync_tasks_alert_channel_id ON sync_tasks (alert_channel_id);
 
 COMMENT ON TABLE sync_tasks IS '数据同步任务';
 
+CREATE TABLE IF NOT EXISTS sync_task_tables (
+  id BIGSERIAL PRIMARY KEY,
+  created_at TIMESTAMPTZ NULL,
+  updated_at TIMESTAMPTZ NULL,
+  task_id BIGINT NOT NULL REFERENCES sync_tasks(id),
+  source_table VARCHAR(100) NOT NULL,
+  target_table VARCHAR(100) NOT NULL,
+  incremental_key VARCHAR(100) NULL,
+  field_mapping JSON NULL,
+  position BIGINT NOT NULL DEFAULT 0,
+  source_primary_key VARCHAR(100) NULL,
+  target_primary_key VARCHAR(100) NULL,
+  CONSTRAINT uk_task_source_table UNIQUE (task_id, source_table)
+);
+CREATE INDEX IF NOT EXISTS idx_sync_task_tables_task_id ON sync_task_tables(task_id);
+COMMENT ON TABLE sync_task_tables IS '同步任务的源表到目标表映射';
+
+CREATE TABLE IF NOT EXISTS sync_checkpoints (
+  id BIGSERIAL PRIMARY KEY,
+  task_table_id BIGINT NOT NULL UNIQUE REFERENCES sync_task_tables(id),
+  cursor_value TEXT NULL,
+  cursor_primary_key TEXT NULL,
+  completed BOOLEAN NOT NULL DEFAULT FALSE,
+  updated_at TIMESTAMPTZ NULL
+);
+COMMENT ON TABLE sync_checkpoints IS '每张同步表的独立检查点';
+
 -- ----------------------------------------------------------------------------
--- 6. 同步运行日志表
+-- 7. 同步运行日志表
 -- 对应 internal/models/sync_task.go 中的 SyncLog
 -- ----------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS sync_logs (
@@ -174,7 +231,21 @@ COMMENT ON TABLE sync_logs IS '同步任务运行日志';
 COMMENT ON COLUMN sync_logs.duration IS '执行耗时，毫秒';
 
 -- ----------------------------------------------------------------------------
--- 7. 初始化后台管理员
+-- 8. 任务预警状态
+-- ----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS task_alert_states (
+  id BIGSERIAL PRIMARY KEY,
+  task_id BIGINT NOT NULL,
+  alert_type VARCHAR(20) NOT NULL,
+  active BOOLEAN NOT NULL DEFAULT FALSE,
+  last_sent_at TIMESTAMPTZ NULL,
+  updated_at TIMESTAMPTZ NULL,
+  CONSTRAINT uk_task_alert_type UNIQUE (task_id, alert_type)
+);
+COMMENT ON TABLE task_alert_states IS '任务预警激活状态和重复提醒时间';
+
+-- ----------------------------------------------------------------------------
+-- 9. 初始化后台管理员
 -- password 是 admin123 的 bcrypt 哈希。
 -- 重复执行时只恢复管理员角色和启用状态，不覆盖用户已修改的密码。
 -- ----------------------------------------------------------------------------
@@ -190,7 +261,7 @@ ON CONFLICT (username) DO UPDATE SET
   updated_at = CURRENT_TIMESTAMP;
 
 -- ----------------------------------------------------------------------------
--- 8. 确保应用账号拥有现有及未来对象权限
+-- 10. 确保应用账号拥有现有及未来对象权限
 -- ----------------------------------------------------------------------------
 GRANT USAGE, CREATE ON SCHEMA public TO mergewong;
 GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO mergewong;
@@ -201,7 +272,7 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public
   GRANT ALL PRIVILEGES ON SEQUENCES TO mergewong;
 
 -- ----------------------------------------------------------------------------
--- 9. 初始化结果检查
+-- 11. 初始化结果检查
 -- ----------------------------------------------------------------------------
 SELECT current_database() AS current_database, current_user AS current_user;
 SELECT id, username, email, role, status

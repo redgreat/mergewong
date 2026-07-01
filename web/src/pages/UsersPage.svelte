@@ -1,5 +1,5 @@
 <script>
-  import { UsersRound } from "lucide-svelte";
+  import { RefreshCw, UsersRound } from "lucide-svelte";
 
   export let users = [];
   export let userPage = 1;
@@ -11,6 +11,7 @@
   export let onOpenNew = () => {};
   export let onEdit = () => {};
   export let onDelete = () => {};
+  export let onRefresh = () => {};
 </script>
 
 <section class="workspace-panel">
@@ -18,6 +19,7 @@
     <div><h2>用户管理</h2></div>
     <div class="header-actions">
       <span class="record-count">共 {userTotal} 个用户</span>
+      <button class="ghost icon-text" on:click={onRefresh}><RefreshCw size={15} />刷新</button>
       <button on:click={onOpenNew}>新增用户</button>
     </div>
   </div>

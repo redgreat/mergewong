@@ -1,5 +1,5 @@
 <script>
-  import { ScrollText } from "lucide-svelte";
+  import { RefreshCw, ScrollText } from "lucide-svelte";
   let taskQuery = "";
   let resultsOpen = false;
   $: filteredTasks = tasks.filter((task) => task.name.toLowerCase().includes(taskQuery.trim().toLowerCase())).slice(0, 8);
@@ -14,6 +14,8 @@
   function handleWindowClick(event) {
     if (!event.target.closest(".task-search")) resultsOpen = false;
   }
+	const eventLabel = (value) => ({ task_created: "新增任务", task_updated: "修改任务", task_deleted: "删除任务", precheck: "预检查", snapshot_started: "全量开始", snapshot_completed: "全量完成", cdc_started: "增量开始", cdc_failed: "增量报错", task_paused: "暂停任务", task_resumed: "开始任务", checkpoint_changed: "修改位点", alert_sent: "发送预警" }[value] || value || "运行事件");
+	const statusLabel = (value) => ({ success: "成功", failed: "失败", running: "进行中", warning: "预警" }[value] || value);
   export let tasks = [];
   export let logTaskId = "";
   export let logs = [];
@@ -23,6 +25,7 @@
   export let onChangeTask = () => {};
   export let onPrev = () => {};
   export let onNext = () => {};
+  export let onRefresh = () => {};
 </script>
 
 <svelte:window on:click={handleWindowClick} />
@@ -32,6 +35,7 @@
     <div>
       <h2>同步日志</h2>
     </div>
+    <div class="header-actions"><button class="ghost icon-text" on:click={onRefresh}><RefreshCw size={15} />刷新</button></div>
   </div>
   <div class="toolbar">
     <div class="task-search">
@@ -52,28 +56,32 @@
     <thead>
       <tr>
         <th>时间</th>
+		<th>同步任务</th>
+		<th>事件</th>
         <th>状态</th>
-        <th>消息</th>
-        <th>影响行数</th>
-        <th>耗时(ms)</th>
+		<th>阶段与详情</th>
+		<th>数据量</th>
+		<th>耗时</th>
       </tr>
     </thead>
     <tbody>
       {#each logs as log}
         <tr>
           <td>{new Date(log.created_at).toLocaleString()}</td>
+		  <td>{log.task_name || tasks.find((task) => task.id === log.task_id)?.name || `任务 #${log.task_id}`}</td>
+		  <td>{eventLabel(log.event_type)}</td>
           <td>
             <span class={`pill ${log.status === "success" ? "success" : log.status === "failed" ? "danger" : "muted"}`}>
-              {log.status}
+			  {statusLabel(log.status)}
             </span>
           </td>
-          <td>{log.message || log.error_detail || "-"}</td>
-          <td>{log.rows_affected}</td>
-          <td>{log.duration}</td>
+		  <td><strong>{log.message || "-"}</strong>{#if log.detail || log.error_detail}<span class="cell-sub log-detail">{log.detail || log.error_detail}</span>{/if}</td>
+		  <td>{log.rows_affected ? `${log.rows_affected} 行` : "-"}</td>
+		  <td>{log.duration ? `${(log.duration / 1000).toFixed(2)} 秒` : "-"}</td>
         </tr>
       {/each}
       {#if logs.length === 0}
-        <tr class="empty-row"><td colspan="5"><div class="empty-state"><span class="empty-icon"><ScrollText size={24} /></span><strong>暂无同步日志</strong></div></td></tr>
+		<tr class="empty-row"><td colspan="7"><div class="empty-state"><span class="empty-icon"><ScrollText size={24} /></span><strong>暂无同步日志</strong></div></td></tr>
       {/if}
     </tbody>
   </table>

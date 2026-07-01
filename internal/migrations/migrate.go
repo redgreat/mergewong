@@ -30,6 +30,27 @@ func (m *Migrator) Run(db *gorm.DB) error {
 	if err := m.migrateSchema(db); err != nil {
 		return fmt.Errorf("表结构迁移失败: %w", err)
 	}
+	if db.Dialector.Name() == "postgres" {
+		if err := db.Exec("ALTER TABLE sync_tasks DROP CONSTRAINT IF EXISTS ck_sync_tasks_sync_type").Error; err != nil {
+			return err
+		}
+		if err := db.Exec("ALTER TABLE sync_tasks ADD CONSTRAINT ck_sync_tasks_sync_type CHECK (sync_type IN ('full', 'cdc', 'full_cdc', 'incremental'))").Error; err != nil {
+			return err
+		}
+	}
+	if err := db.Model(&models.SyncTask{}).Where("sync_type = ?", "incremental").Updates(map[string]interface{}{
+		"sync_type": "full_cdc", "schedule_type": "manual", "status": 0, "validation_status": "pending",
+	}).Error; err != nil {
+		return fmt.Errorf("旧增量任务迁移失败: %w", err)
+	}
+	if db.Dialector.Name() == "postgres" {
+		if err := db.Exec("ALTER TABLE sync_tasks DROP CONSTRAINT IF EXISTS ck_sync_tasks_sync_type").Error; err != nil {
+			return err
+		}
+		if err := db.Exec("ALTER TABLE sync_tasks ADD CONSTRAINT ck_sync_tasks_sync_type CHECK (sync_type IN ('full', 'cdc', 'full_cdc'))").Error; err != nil {
+			return err
+		}
+	}
 
 	// 3. 初始化基础数据
 	if err := m.initializeData(db); err != nil {
@@ -86,8 +107,13 @@ func (m *Migrator) migrateSchema(db *gorm.DB) error {
 	models := []interface{}{
 		&models.User{},
 		&models.DatabaseConnection{},
+		&models.AlertChannel{},
 		&models.SyncTask{},
+		&models.SyncTaskTable{},
+		&models.SyncCheckpoint{},
+		&models.SyncCDCCheckpoint{},
 		&models.SyncLog{},
+		&models.TaskAlertState{},
 	}
 
 	// 执行自动迁移

@@ -12,8 +12,9 @@ type DatabaseConnection struct {
 	CreatedAt time.Time      `json:"created_at"`
 	UpdatedAt time.Time      `json:"updated_at"`
 	DeletedAt gorm.DeletedAt `gorm:"index" json:"-"`
-	Name      string         `gorm:"uniqueIndex;size:50;not null" json:"name"` // 连接名称
-	Type      string         `gorm:"size:20;not null" json:"type"`             // mysql, postgres, sqlserver, oracle
+	Name      string         `gorm:"uniqueIndex;size:50;not null" json:"name"`   // 连接名称
+	Type      string         `gorm:"size:20;not null" json:"type"`               // mysql, postgres, sqlserver, oracle
+	Usage     string         `gorm:"size:20;not null;default:both" json:"usage"` // source, target, both
 	Host      string         `gorm:"size:100;not null" json:"host"`
 	Port      int            `gorm:"not null" json:"port"`
 	Database  string         `gorm:"size:100;not null" json:"database"`

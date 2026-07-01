@@ -22,6 +22,7 @@ func NewConnectionHandler() *ConnectionHandler {
 type CreateConnectionRequest struct {
 	Name     string `json:"name" binding:"required"`
 	Type     string `json:"type" binding:"required"`
+	Usage    string `json:"usage" binding:"required,oneof=source target both"`
 	Host     string `json:"host" binding:"required"`
 	Port     int    `json:"port" binding:"required"`
 	Database string `json:"database" binding:"required"`
@@ -30,7 +31,6 @@ type CreateConnectionRequest struct {
 	Charset  string `json:"charset"`
 	MaxIdle  int    `json:"max_idle"`
 	MaxOpen  int    `json:"max_open"`
-	Status   *int   `json:"status"`
 }
 
 func (h *ConnectionHandler) CreateConnection(c *gin.Context) {
@@ -41,14 +41,10 @@ func (h *ConnectionHandler) CreateConnection(c *gin.Context) {
 	}
 
 	userID, _ := c.Get("user_id")
-	status := 1
-	if req.Status != nil {
-		status = *req.Status
-	}
-
 	connection := &models.DatabaseConnection{
 		Name:     req.Name,
 		Type:     req.Type,
+		Usage:    req.Usage,
 		Host:     req.Host,
 		Port:     req.Port,
 		Database: req.Database,
@@ -57,7 +53,7 @@ func (h *ConnectionHandler) CreateConnection(c *gin.Context) {
 		Charset:  req.Charset,
 		MaxIdle:  req.MaxIdle,
 		MaxOpen:  req.MaxOpen,
-		Status:   status,
+		Status:   1,
 		UserID:   userID.(uint),
 	}
 
@@ -119,6 +115,7 @@ func (h *ConnectionHandler) GetConnection(c *gin.Context) {
 type UpdateConnectionRequest struct {
 	Name     string `json:"name"`
 	Type     string `json:"type"`
+	Usage    string `json:"usage" binding:"omitempty,oneof=source target both"`
 	Host     string `json:"host"`
 	Port     *int   `json:"port"`
 	Database string `json:"database"`
@@ -151,6 +148,9 @@ func (h *ConnectionHandler) UpdateConnection(c *gin.Context) {
 	}
 	if req.Type != "" {
 		updated.Type = req.Type
+	}
+	if req.Usage != "" {
+		updated.Usage = req.Usage
 	}
 	if req.Host != "" {
 		updated.Host = req.Host
@@ -203,6 +203,9 @@ func (h *ConnectionHandler) UpdateConnection(c *gin.Context) {
 	}
 	if req.Type != "" {
 		updates["type"] = updated.Type
+	}
+	if req.Usage != "" {
+		updates["usage"] = updated.Usage
 	}
 	if req.Host != "" {
 		updates["host"] = updated.Host

@@ -1,5 +1,5 @@
 <script>
-  import { Database } from "lucide-svelte";
+  import { Database, RefreshCw } from "lucide-svelte";
   export let connections = [];
   export let connectionPage = 1;
   export let connectionPageSize = 10;
@@ -11,6 +11,7 @@
   export let onTest = (c) => {};
   export let onDelete = (c) => {};
   export let canManage = false;
+  export let onRefresh = () => {};
 </script>
 
 <section class="workspace-panel">
@@ -20,6 +21,7 @@
     </div>
     <div class="header-actions">
       <span class="record-count">共 {connectionTotal} 个连接</span>
+      <button class="ghost icon-text" on:click={onRefresh}><RefreshCw size={15} />刷新</button>
       {#if canManage}<button on:click={onOpenNew}>新增连接</button>{/if}
     </div>
   </div>
@@ -28,6 +30,7 @@
       <tr>
         <th>名称</th>
         <th>类型</th>
+        <th>用途</th>
         <th>地址</th>
         <th>数据库</th>
         <th>用户</th>
@@ -40,6 +43,7 @@
         <tr>
           <td>{connection.name}</td>
           <td>{connection.type}</td>
+          <td><span class="pill">{connection.usage === "source" ? "源端" : connection.usage === "target" ? "目标端" : "源端 / 目标端"}</span></td>
           <td>{connection.host}:{connection.port}</td>
           <td>{connection.database}</td>
           <td>{connection.username}</td>
@@ -56,7 +60,7 @@
         </tr>
       {/each}
       {#if connections.length === 0}
-        <tr class="empty-row"><td colspan={canManage ? 7 : 6}><div class="empty-state"><span class="empty-icon"><Database size={24} /></span><strong>还没有数据库连接</strong>{#if canManage}<button on:click={onOpenNew}>新增连接</button>{/if}</div></td></tr>
+        <tr class="empty-row"><td colspan={canManage ? 8 : 7}><div class="empty-state"><span class="empty-icon"><Database size={24} /></span><strong>还没有数据库连接</strong>{#if canManage}<button on:click={onOpenNew}>新增连接</button>{/if}</div></td></tr>
       {/if}
     </tbody>
   </table>

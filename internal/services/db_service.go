@@ -6,7 +6,6 @@ import (
 	"github.com/redgreat/apiwong/internal/database"
 )
 
-
 // DBService 数据库服务
 type DBService struct{}
 
@@ -105,8 +104,18 @@ func (s *DBService) ListTables(dbName string) ([]string, error) {
 	}
 
 	var tables []string
-	// 使用 GORM 的 Migrator 获取表列表
-	if err := db.Raw("SHOW TABLES").Scan(&tables).Error; err != nil {
+	var query string
+	switch db.Dialector.Name() {
+	case "mysql":
+		query = "SHOW TABLES"
+	case "postgres":
+		query = "SELECT table_name FROM information_schema.tables WHERE table_schema = current_schema() AND table_type = 'BASE TABLE' ORDER BY table_name"
+	case "sqlserver":
+		query = "SELECT name FROM sys.tables ORDER BY name"
+	default:
+		return nil, fmt.Errorf("数据库类型 %s 暂不支持读取表清单", db.Dialector.Name())
+	}
+	if err := db.Raw(query).Scan(&tables).Error; err != nil {
 		return nil, err
 	}
 
@@ -122,7 +131,7 @@ func (s *DBService) GetTableSchema(dbName, tableName string) ([]map[string]inter
 
 	var schema []map[string]interface{}
 	sql := fmt.Sprintf("DESCRIBE %s", tableName)
-	
+
 	rows, err := db.Raw(sql).Rows()
 	if err != nil {
 		return nil, err

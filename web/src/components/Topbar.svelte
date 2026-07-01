@@ -11,7 +11,7 @@
 
   let menuOpen = false;
 
-  $: pageTitle = view === "connections" ? "数据库连接" : view === "tasks" ? "同步任务" : view === "logs" ? "同步日志" : view === "users" ? "用户管理" : "登录";
+  $: pageTitle = view === "connections" ? "数据库连接" : view === "tasks" ? "同步任务" : view === "logs" ? "同步日志" : view === "alerts" ? "预警管理" : view === "users" ? "用户管理" : "登录";
 
   function handleWindowClick(event) {
     if (!event.target.closest(".account-menu")) menuOpen = false;

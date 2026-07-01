@@ -1,8 +1,11 @@
 package scheduler
 
 import (
+	"context"
+	"fmt"
 	"log"
 	"sync"
+	"time"
 
 	"github.com/redgreat/apiwong/internal/database"
 	"github.com/redgreat/apiwong/internal/models"
@@ -45,6 +48,15 @@ func (s *Scheduler) Start() error {
 		return err
 	}
 
+	if _, err := s.cron.AddFunc("@every 1m", func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 50*time.Second)
+		defer cancel()
+		if err := services.NewAlertService().CheckTaskAlerts(ctx); err != nil {
+			log.Printf("任务预警巡检失败: %v", err)
+		}
+	}); err != nil {
+		return err
+	}
 	s.cron.Start()
 	log.Println("定时任务调度器已启动")
 	return nil
@@ -65,7 +77,7 @@ func (s *Scheduler) LoadTasks() error {
 	}
 
 	var tasks []models.SyncTask
-	if err := db.Where("status = ? AND cron_expression != ?", 1, "").Find(&tasks).Error; err != nil {
+	if err := db.Where("status = ? AND schedule_type != ?", 1, "manual").Find(&tasks).Error; err != nil {
 		if err == gorm.ErrRecordNotFound {
 			log.Println("没有启用的定时同步任务")
 			return nil
@@ -76,7 +88,7 @@ func (s *Scheduler) LoadTasks() error {
 	log.Printf("加载了 %d 个定时同步任务", len(tasks))
 
 	for _, task := range tasks {
-		if err := s.AddTask(task.ID, task.CronExpression); err != nil {
+		if err := s.AddTask(&task); err != nil {
 			log.Printf("添加任务失败 [ID: %d]: %v", task.ID, err)
 		}
 	}
@@ -85,9 +97,10 @@ func (s *Scheduler) LoadTasks() error {
 }
 
 // AddTask 添加定时任务
-func (s *Scheduler) AddTask(taskID uint, cronExpression string) error {
+func (s *Scheduler) AddTask(task *models.SyncTask) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	taskID := task.ID
 
 	// 检查任务是否已存在
 	if _, exists := s.tasks[taskID]; exists {
@@ -95,7 +108,11 @@ func (s *Scheduler) AddTask(taskID uint, cronExpression string) error {
 	}
 
 	// 添加 Cron 任务
-	entryID, err := s.cron.AddFunc(cronExpression, func() {
+	spec, err := ScheduleSpec(task)
+	if err != nil {
+		return err
+	}
+	entryID, err := s.cron.AddFunc(spec, func() {
 		log.Printf("执行定时同步任务 [ID: %d]", taskID)
 		if err := s.syncService.ExecuteTask(taskID); err != nil {
 			log.Printf("定时同步任务执行失败 [ID: %d]: %v", taskID, err)
@@ -109,7 +126,7 @@ func (s *Scheduler) AddTask(taskID uint, cronExpression string) error {
 	}
 
 	s.tasks[taskID] = entryID
-	log.Printf("添加定时任务 [ID: %d, Cron: %s]", taskID, cronExpression)
+	log.Printf("添加定时任务 [ID: %d, Schedule: %s]", taskID, spec)
 	return nil
 }
 
@@ -126,7 +143,29 @@ func (s *Scheduler) RemoveTask(taskID uint) {
 }
 
 // UpdateTask 更新定时任务
-func (s *Scheduler) UpdateTask(taskID uint, cronExpression string) error {
-	s.RemoveTask(taskID)
-	return s.AddTask(taskID, cronExpression)
+func (s *Scheduler) RefreshTask(task *models.SyncTask) error {
+	s.RemoveTask(task.ID)
+	if task.Status == 0 || task.ScheduleType == "manual" {
+		return nil
+	}
+	return s.AddTask(task)
+}
+
+func ScheduleSpec(task *models.SyncTask) (string, error) {
+	switch task.ScheduleType {
+	case "interval", "":
+		if task.IntervalMinutes < 1 {
+			return "", fmt.Errorf("执行间隔至少为 1 分钟")
+		}
+		return fmt.Sprintf("@every %dm", task.IntervalMinutes), nil
+	case "cron":
+		if task.CronExpression == "" {
+			return "", fmt.Errorf("Cron 表达式不能为空")
+		}
+		return task.CronExpression, nil
+	case "manual":
+		return "", nil
+	default:
+		return "", fmt.Errorf("不支持的调度方式: %s", task.ScheduleType)
+	}
 }
