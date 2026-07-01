@@ -279,10 +279,10 @@ func (s *SyncService) ExecuteTask(taskID uint) error {
 		log.ErrorDetail = err.Error()
 		log.Duration = duration
 
-		if task.AlertOnError && task.AlertChannel != nil && task.AlertChannel.Status == 1 {
-			content := fmt.Sprintf("MergeWong 同步任务预警\n任务：%s\n状态：执行失败\n时间：%s\n原因：%s", task.Name, time.Now().Format("2006-01-02 15:04:05"), err.Error())
+		if task.AlertChannel != nil && task.AlertChannel.Status == 1 {
+			content := fmt.Sprintf("数据同步任务报错预警\n任务：%s\n状态：执行失败\n时间：%s\n原因：%s", task.Name, time.Now().Format("2006-01-02 15:04:05"), err.Error())
 			alertCtx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-			alertErr := NewAlertService().SendTaskAlert(alertCtx, task, "error", content)
+			alertErr := NewAlertService().SendTaskAlertImmediate(alertCtx, task, "error", content)
 			cancel()
 			if alertErr != nil {
 				stdlog.Printf("任务 %d 预警发送失败: %v", taskID, alertErr)
@@ -321,8 +321,8 @@ func (s *SyncService) ExecuteTask(taskID uint) error {
 	})
 	s.RecordTaskEvent(task, "snapshot_completed", "snapshot", "success", "全量数据初始化完成", "", rowsAffected, duration)
 	alertService := NewAlertService()
-	_ = alertService.ResolveTaskAlert(taskID, "error")
-	_ = alertService.ResolveTaskAlert(taskID, "delay")
+	_ = alertService.ResolveTaskAlertSilent(taskID, "error")
+	_ = alertService.ResolveTaskAlertSilent(taskID, "delay")
 
 	return nil
 }

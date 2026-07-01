@@ -45,11 +45,9 @@ func (s *ConnectionService) CreateConnection(connection *models.DatabaseConnecti
 		return err
 	}
 
-	if connection.Status == 1 {
-		if err := s.addToManager(connection); err != nil {
-			s.systemDB.Delete(&models.DatabaseConnection{}, connection.ID)
-			return err
-		}
+	if err := s.addToManager(connection); err != nil {
+		s.systemDB.Delete(&models.DatabaseConnection{}, connection.ID)
+		return err
 	}
 
 	return nil
@@ -65,16 +63,14 @@ func (s *ConnectionService) DeleteConnection(id uint) error {
 		return err
 	}
 
-	if connection.Status == 1 {
-		_ = s.removeFromManager(connection.Name)
-	}
+	_ = s.removeFromManager(connection.Name)
 
 	return s.systemDB.Delete(&models.DatabaseConnection{}, id).Error
 }
 
 func (s *ConnectionService) LoadEnabledConnections() error {
 	var connections []models.DatabaseConnection
-	if err := s.systemDB.Where("status = ?", 1).Find(&connections).Error; err != nil {
+	if err := s.systemDB.Find(&connections).Error; err != nil {
 		return err
 	}
 
@@ -108,11 +104,11 @@ func (s *ConnectionService) TestConnection(connection *models.DatabaseConnection
 }
 
 func (s *ConnectionService) RefreshManager(oldConnection, newConnection *models.DatabaseConnection) error {
-	if oldConnection != nil && oldConnection.Status == 1 {
+	if oldConnection != nil {
 		_ = s.removeFromManager(oldConnection.Name)
 	}
 
-	if newConnection != nil && newConnection.Status == 1 {
+	if newConnection != nil {
 		return s.addToManager(newConnection)
 	}
 

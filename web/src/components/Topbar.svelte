@@ -21,9 +21,7 @@
 <svelte:window on:click={handleWindowClick} />
 
 <header class="topbar">
-  <div class="breadcrumb" aria-label="面包屑">
-    <span>数据同步</span>
-    <span class="breadcrumb-separator">/</span>
+  <div class="breadcrumb" aria-label="当前页面">
     <strong>{pageTitle}</strong>
   </div>
 

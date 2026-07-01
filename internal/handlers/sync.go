@@ -25,22 +25,19 @@ func NewSyncHandler() *SyncHandler {
 
 // CreateTaskRequest 创建任务请求
 type CreateTaskRequest struct {
-	Name                 string             `json:"name" binding:"required"`
-	SourceDB             string             `json:"source_db" binding:"required"`
-	SourceTable          string             `json:"source_table"`
-	TargetDB             string             `json:"target_db" binding:"required"`
-	TargetTable          string             `json:"target_table"`
-	Tables               []TaskTableRequest `json:"tables"`
-	FieldMapping         map[string]string  `json:"field_mapping"`
-	SyncType             string             `json:"sync_type" binding:"required,oneof=full cdc full_cdc"`
-	CronExpression       string             `json:"cron_expression"`
-	ScheduleType         string             `json:"schedule_type" binding:"required,oneof=manual interval cron"`
-	IntervalMinutes      int                `json:"interval_minutes"`
-	AlertChannelID       *uint              `json:"alert_channel_id"`
-	AlertDelayMinutes    int                `json:"alert_delay_minutes"`
-	AlertStoppedMinutes  int                `json:"alert_stopped_minutes"`
-	AlertOnError         *bool              `json:"alert_on_error"`
-	AlertCooldownMinutes int                `json:"alert_cooldown_minutes"`
+	Name              string             `json:"name" binding:"required"`
+	SourceDB          string             `json:"source_db" binding:"required"`
+	SourceTable       string             `json:"source_table"`
+	TargetDB          string             `json:"target_db" binding:"required"`
+	TargetTable       string             `json:"target_table"`
+	Tables            []TaskTableRequest `json:"tables"`
+	FieldMapping      map[string]string  `json:"field_mapping"`
+	SyncType          string             `json:"sync_type" binding:"required,oneof=full cdc full_cdc"`
+	CronExpression    string             `json:"cron_expression"`
+	ScheduleType      string             `json:"schedule_type" binding:"required,oneof=manual interval cron"`
+	IntervalMinutes   int                `json:"interval_minutes"`
+	AlertChannelID    *uint              `json:"alert_channel_id"`
+	AlertDelaySeconds int                `json:"alert_delay_seconds"`
 }
 
 type TaskTableRequest struct {
@@ -58,29 +55,21 @@ func (h *SyncHandler) CreateTask(c *gin.Context) {
 	}
 
 	userID, _ := c.Get("user_id")
-	alertOnError := true
-	if req.AlertOnError != nil {
-		alertOnError = *req.AlertOnError
-	}
-
 	task := &models.SyncTask{
-		Name:                 req.Name,
-		SourceDB:             req.SourceDB,
-		SourceTable:          req.SourceTable,
-		TargetDB:             req.TargetDB,
-		TargetTable:          req.TargetTable,
-		FieldMapping:         req.FieldMapping,
-		SyncType:             req.SyncType,
-		CronExpression:       req.CronExpression,
-		ScheduleType:         req.ScheduleType,
-		IntervalMinutes:      req.IntervalMinutes,
-		AlertChannelID:       req.AlertChannelID,
-		AlertDelayMinutes:    req.AlertDelayMinutes,
-		AlertStoppedMinutes:  req.AlertStoppedMinutes,
-		AlertOnError:         alertOnError,
-		AlertCooldownMinutes: req.AlertCooldownMinutes,
-		Status:               1,
-		UserID:               userID.(uint),
+		Name:              req.Name,
+		SourceDB:          req.SourceDB,
+		SourceTable:       req.SourceTable,
+		TargetDB:          req.TargetDB,
+		TargetTable:       req.TargetTable,
+		FieldMapping:      req.FieldMapping,
+		SyncType:          req.SyncType,
+		CronExpression:    req.CronExpression,
+		ScheduleType:      req.ScheduleType,
+		IntervalMinutes:   req.IntervalMinutes,
+		AlertChannelID:    req.AlertChannelID,
+		AlertDelaySeconds: req.AlertDelaySeconds,
+		Status:            1,
+		UserID:            userID.(uint),
 	}
 
 	tableRequests := req.Tables
@@ -139,26 +128,12 @@ func (h *SyncHandler) GetTask(c *gin.Context) {
 
 // UpdateTaskRequest 更新任务请求
 type UpdateTaskRequest struct {
-	Name                 string             `json:"name"`
-	SourceDB             string             `json:"source_db"`
-	SourceTable          string             `json:"source_table"`
-	TargetDB             string             `json:"target_db"`
-	TargetTable          string             `json:"target_table"`
-	FieldMapping         map[string]string  `json:"field_mapping"`
-	SyncType             string             `json:"sync_type"`
-	CronExpression       string             `json:"cron_expression"`
-	ScheduleType         string             `json:"schedule_type"`
-	IntervalMinutes      int                `json:"interval_minutes"`
-	Status               *int               `json:"status"`
-	AlertChannelID       uint               `json:"alert_channel_id"`
-	AlertDelayMinutes    int                `json:"alert_delay_minutes"`
-	AlertStoppedMinutes  int                `json:"alert_stopped_minutes"`
-	AlertOnError         *bool              `json:"alert_on_error"`
-	AlertCooldownMinutes int                `json:"alert_cooldown_minutes"`
-	Tables               []TaskTableRequest `json:"tables"`
+	AlertChannelID    uint               `json:"alert_channel_id"`
+	AlertDelaySeconds int                `json:"alert_delay_seconds"`
+	Tables            []TaskTableRequest `json:"tables"`
 }
 
-// UpdateTask 更新任务
+// UpdateTask 更新任务（仅允许修改同步对象和预警策略）
 func (h *SyncHandler) UpdateTask(c *gin.Context) {
 	id, _ := strconv.ParseUint(c.Param("id"), 10, 32)
 	services.GetCDCManager().StopTask(uint(id))
@@ -168,75 +143,17 @@ func (h *SyncHandler) UpdateTask(c *gin.Context) {
 		utils.BadRequest(c, "请求参数错误: "+err.Error())
 		return
 	}
-	if req.AlertDelayMinutes < 0 || req.AlertStoppedMinutes < 0 || req.AlertCooldownMinutes < 0 {
+	if req.AlertDelaySeconds < 0 {
 		utils.BadRequest(c, "预警时间配置不正确")
 		return
-	}
-	if req.ScheduleType != "" && req.ScheduleType != "manual" {
-		utils.BadRequest(c, "全量初始化和 Binlog CDC 不需要 Cron 或轮询调度")
-		return
-	}
-	if req.ScheduleType == "interval" && req.AlertStoppedMinutes > 0 && req.AlertStoppedMinutes <= req.IntervalMinutes {
-		utils.BadRequest(c, "停止阈值必须大于任务执行间隔")
-		return
-	}
-	if req.ScheduleType != "" {
-		candidate := &models.SyncTask{ScheduleType: req.ScheduleType, IntervalMinutes: req.IntervalMinutes, CronExpression: req.CronExpression}
-		if _, err := scheduler.ScheduleSpec(candidate); err != nil && req.ScheduleType != "manual" {
-			utils.BadRequest(c, "调度配置错误: "+err.Error())
-			return
-		}
-	}
-	if req.SourceDB != "" && req.TargetDB != "" {
-		if err := h.syncService.ValidateTaskConnections(req.SourceDB, req.TargetDB); err != nil {
-			utils.BadRequest(c, err.Error())
-			return
-		}
-	}
-
-	updates := make(map[string]interface{})
-	if req.Name != "" {
-		updates["name"] = req.Name
-	}
-	if req.SourceDB != "" {
-		updates["source_db"] = req.SourceDB
-	}
-	if req.SourceTable != "" {
-		updates["source_table"] = req.SourceTable
-	}
-	if req.TargetDB != "" {
-		updates["target_db"] = req.TargetDB
-	}
-	if req.TargetTable != "" {
-		updates["target_table"] = req.TargetTable
-	}
-	if req.FieldMapping != nil {
-		updates["field_mapping"] = req.FieldMapping
-	}
-	if req.SyncType != "" {
-		updates["sync_type"] = req.SyncType
-	}
-	if req.CronExpression != "" {
-		updates["cron_expression"] = req.CronExpression
-	}
-	if req.ScheduleType != "" {
-		updates["schedule_type"] = req.ScheduleType
-	}
-	updates["interval_minutes"] = req.IntervalMinutes
-	updates["alert_delay_minutes"] = req.AlertDelayMinutes
-	updates["alert_stopped_minutes"] = req.AlertStoppedMinutes
-	if req.AlertCooldownMinutes > 0 {
-		updates["alert_cooldown_minutes"] = req.AlertCooldownMinutes
-	}
-	if req.AlertOnError != nil {
-		updates["alert_on_error"] = *req.AlertOnError
-	}
-	if req.Status != nil {
-		updates["status"] = *req.Status
 	}
 	if err := h.syncService.ValidateAlertChannelID(req.AlertChannelID); err != nil {
 		utils.BadRequest(c, err.Error())
 		return
+	}
+
+	updates := map[string]interface{}{
+		"alert_delay_seconds": req.AlertDelaySeconds,
 	}
 	if req.AlertChannelID == 0 {
 		updates["alert_channel_id"] = nil
@@ -267,6 +184,7 @@ func (h *SyncHandler) UpdateTask(c *gin.Context) {
 	utils.SuccessWithMessage(c, "更新成功", nil)
 	h.syncService.RecordTaskEvent(updatedTask, "task_updated", "config", "success", "同步任务配置已修改", "", 0, 0)
 }
+
 
 // DeleteTask 删除任务
 func (h *SyncHandler) DeleteTask(c *gin.Context) {

@@ -338,8 +338,7 @@
         password: connectionForm.password,
         charset: (connectionForm.charset || "utf8mb4").trim(),
         max_idle: Number(connectionForm.max_idle) || 10,
-        max_open: Number(connectionForm.max_open) || 100,
-        status: Number(connectionForm.status)
+        max_open: Number(connectionForm.max_open) || 100
       };
 
       if (editingConnectionId) {
@@ -637,9 +636,6 @@
     {token}
     {view}
     setView={changeView}
-    {connectionTotal}
-    {taskTotal}
-    {logTotal}
     {sidebarCollapsed}
     toggleSidebar={toggleSidebar}
     role={currentUser.role}
@@ -664,6 +660,7 @@
       <ConnectionsPage
         canManage={isAdmin}
         {connections}
+        {tasks}
         {connectionPage}
         {connectionPageSize}
         {connectionTotal}

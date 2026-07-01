@@ -1,6 +1,7 @@
 <script>
   import { Database, RefreshCw } from "lucide-svelte";
   export let connections = [];
+  export let tasks = [];
   export let connectionPage = 1;
   export let connectionPageSize = 10;
   export let connectionTotal = 0;
@@ -12,6 +13,10 @@
   export let onDelete = (c) => {};
   export let canManage = false;
   export let onRefresh = () => {};
+
+  function isUsedByTask(conn) {
+    return tasks.some(t => t.source_db === conn.name || t.target_db === conn.name);
+  }
 </script>
 
 <section class="workspace-panel">
@@ -34,12 +39,12 @@
         <th>地址</th>
         <th>数据库</th>
         <th>用户</th>
-        <th>状态</th>
         {#if canManage}<th>操作</th>{/if}
       </tr>
     </thead>
     <tbody>
       {#each connections as connection}
+        {@const inUse = isUsedByTask(connection)}
         <tr>
           <td>{connection.name}</td>
           <td>{connection.type}</td>
@@ -47,20 +52,15 @@
           <td>{connection.host}:{connection.port}</td>
           <td>{connection.database}</td>
           <td>{connection.username}</td>
-          <td>
-            <span class={`pill ${connection.status === 1 ? "success" : "muted"}`}>
-              {connection.status === 1 ? "启用" : "禁用"}
-            </span>
-          </td>
           {#if canManage}<td class="row-actions">
-            <button class="ghost" on:click={() => onEdit(connection)}>编辑</button>
+            <button class="ghost" disabled={inUse} title={inUse ? "该连接正被同步任务使用，不可编辑" : ""} on:click={() => !inUse && onEdit(connection)}>编辑</button>
             <button class="ghost" on:click={() => onTest(connection)}>测试</button>
-            <button class="danger" on:click={() => onDelete(connection)}>删除</button>
+            <button class="danger" disabled={inUse} title={inUse ? "该连接正被同步任务使用，不可删除" : ""} on:click={() => !inUse && onDelete(connection)}>删除</button>
           </td>{/if}
         </tr>
       {/each}
       {#if connections.length === 0}
-        <tr class="empty-row"><td colspan={canManage ? 8 : 7}><div class="empty-state"><span class="empty-icon"><Database size={24} /></span><strong>还没有数据库连接</strong>{#if canManage}<button on:click={onOpenNew}>新增连接</button>{/if}</div></td></tr>
+        <tr class="empty-row"><td colspan={canManage ? 7 : 6}><div class="empty-state"><span class="empty-icon"><Database size={24} /></span><strong>还没有数据库连接</strong>{#if canManage}<button on:click={onOpenNew}>新增连接</button>{/if}</div></td></tr>
       {/if}
     </tbody>
   </table>

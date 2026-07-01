@@ -48,12 +48,9 @@ type SyncTask struct {
 	LastRunMessage       string             `gorm:"type:text" json:"last_run_message"` // 最后执行消息
 	LastSuccessAt        *time.Time         `json:"last_success_at"`
 	UserID               uint               `gorm:"not null" json:"user_id"`                 // 创建者
-	AlertChannelID       *uint              `gorm:"index" json:"alert_channel_id,omitempty"` // 预警发送方
-	AlertChannel         *AlertChannel      `gorm:"foreignKey:AlertChannelID" json:"alert_channel,omitempty"`
-	AlertDelayMinutes    int                `gorm:"not null;default:0" json:"alert_delay_minutes"`
-	AlertStoppedMinutes  int                `gorm:"not null;default:0" json:"alert_stopped_minutes"`
-	AlertOnError         bool               `gorm:"not null;default:true" json:"alert_on_error"`
-	AlertCooldownMinutes int                `gorm:"not null;default:30" json:"alert_cooldown_minutes"`
+	AlertChannelID    *uint         `gorm:"index" json:"alert_channel_id,omitempty"` // 预警发送方
+	AlertChannel      *AlertChannel `gorm:"foreignKey:AlertChannelID" json:"alert_channel,omitempty"`
+	AlertDelaySeconds int           `gorm:"not null;default:0" json:"alert_delay_seconds"` // 延迟预警阈值（秒）
 	ValidationStatus     string             `gorm:"size:20;not null;default:legacy" json:"validation_status"`
 	RuntimeStatus        string             `gorm:"size:30;not null;default:stopped;index" json:"runtime_status"`
 	RowsProcessed        int64              `gorm:"not null;default:0" json:"rows_processed"`
@@ -138,6 +135,8 @@ type TaskAlertState struct {
 	TaskID     uint       `gorm:"not null;uniqueIndex:uk_task_alert_type" json:"task_id"`
 	AlertType  string     `gorm:"size:20;not null;uniqueIndex:uk_task_alert_type" json:"alert_type"`
 	Active     bool       `gorm:"not null;default:false" json:"active"`
+	AlertCount int        `gorm:"not null;default:0" json:"alert_count"` // 本轮已发送次数
+	SilentAt   *time.Time `json:"silent_at"`                             // 进入静默的时刻
 	LastSentAt *time.Time `json:"last_sent_at"`
 	UpdatedAt  time.Time  `json:"updated_at"`
 }

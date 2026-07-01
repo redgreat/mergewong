@@ -53,7 +53,6 @@ func (h *ConnectionHandler) CreateConnection(c *gin.Context) {
 		Charset:  req.Charset,
 		MaxIdle:  req.MaxIdle,
 		MaxOpen:  req.MaxOpen,
-		Status:   1,
 		UserID:   userID.(uint),
 	}
 
@@ -67,11 +66,9 @@ func (h *ConnectionHandler) CreateConnection(c *gin.Context) {
 		connection.MaxOpen = 100
 	}
 
-	if connection.Status == 1 {
-		if err := h.connectionService.TestConnection(connection); err != nil {
-			utils.BadRequest(c, "连接测试失败: "+err.Error())
-			return
-		}
+	if err := h.connectionService.TestConnection(connection); err != nil {
+		utils.BadRequest(c, "连接测试失败: "+err.Error())
+		return
 	}
 
 	if err := h.connectionService.CreateConnection(connection); err != nil {
@@ -124,7 +121,6 @@ type UpdateConnectionRequest struct {
 	Charset  string `json:"charset"`
 	MaxIdle  *int   `json:"max_idle"`
 	MaxOpen  *int   `json:"max_open"`
-	Status   *int   `json:"status"`
 }
 
 func (h *ConnectionHandler) UpdateConnection(c *gin.Context) {
@@ -176,9 +172,6 @@ func (h *ConnectionHandler) UpdateConnection(c *gin.Context) {
 	if req.MaxOpen != nil {
 		updated.MaxOpen = *req.MaxOpen
 	}
-	if req.Status != nil {
-		updated.Status = *req.Status
-	}
 
 	if updated.Charset == "" {
 		updated.Charset = "utf8mb4"
@@ -190,11 +183,9 @@ func (h *ConnectionHandler) UpdateConnection(c *gin.Context) {
 		updated.MaxOpen = 100
 	}
 
-	if updated.Status == 1 {
-		if err := h.connectionService.TestConnection(&updated); err != nil {
-			utils.BadRequest(c, "连接测试失败: "+err.Error())
-			return
-		}
+	if err := h.connectionService.TestConnection(&updated); err != nil {
+		utils.BadRequest(c, "连接测试失败: "+err.Error())
+		return
 	}
 
 	updates := make(map[string]interface{})
@@ -230,9 +221,6 @@ func (h *ConnectionHandler) UpdateConnection(c *gin.Context) {
 	}
 	if req.MaxOpen != nil {
 		updates["max_open"] = updated.MaxOpen
-	}
-	if req.Status != nil {
-		updates["status"] = updated.Status
 	}
 
 	if err := h.connectionService.UpdateConnection(uint(id), updates); err != nil {

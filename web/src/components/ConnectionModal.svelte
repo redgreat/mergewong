@@ -76,15 +76,6 @@
           最大打开连接
           <input type="number" min="1" bind:value={form.max_open} />
         </label>
-        {#if editing}
-        <label>
-          状态
-          <select bind:value={form.status}>
-            <option value="1">启用</option>
-            <option value="0">禁用</option>
-          </select>
-        </label>
-        {/if}
       </div>
       <div class="actions">
         <button on:click={onSave}>{editing ? "保存修改" : "创建连接"}</button>

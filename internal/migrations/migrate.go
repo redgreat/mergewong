@@ -104,7 +104,7 @@ func (m *Migrator) migrateSchema(db *gorm.DB) error {
 	log.Println("[2/3] 迁移数据库表结构...")
 
 	// 定义所有需要迁移的模型
-	models := []interface{}{
+	modelList := []interface{}{
 		&models.User{},
 		&models.DatabaseConnection{},
 		&models.AlertChannel{},
@@ -117,12 +117,22 @@ func (m *Migrator) migrateSchema(db *gorm.DB) error {
 	}
 
 	// 执行自动迁移
-	for _, model := range models {
+	for _, model := range modelList {
 		modelName := fmt.Sprintf("%T", model)
 		log.Printf("  - 正在迁移: %s", modelName)
 
 		if err := db.AutoMigrate(model); err != nil {
 			return fmt.Errorf("迁移 %s 失败: %w", modelName, err)
+		}
+	}
+
+	// 删除 database_connections.status 废弃列（向后兼容，列不存在时跳过）
+	conn := &models.DatabaseConnection{}
+	if db.Migrator().HasColumn(conn, "status") {
+		if err := db.Migrator().DropColumn(conn, "status"); err != nil {
+			log.Printf("  - 删除 database_connections.status 列失败（已忽略）: %v", err)
+		} else {
+			log.Println("  - 已删除 database_connections.status 废弃列")
 		}
 	}
 

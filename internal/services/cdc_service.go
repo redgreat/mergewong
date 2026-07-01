@@ -388,9 +388,9 @@ func (s *SyncService) recordCDCFailure(task *models.SyncTask, err error) {
 	now := time.Now()
 	_ = s.UpdateTask(task.ID, map[string]interface{}{"last_run_at": &now, "last_run_status": "failed", "runtime_status": "failed", "last_run_message": err.Error()})
 	s.RecordTaskEvent(task, "cdc_failed", "cdc", "failed", "CDC 同步失败", err.Error(), 0, 0)
-	if task.AlertOnError && task.AlertChannel != nil && task.AlertChannel.Status == 1 {
+	if task.AlertChannel != nil && task.AlertChannel.Status == 1 {
 		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 		defer cancel()
-		_ = NewAlertService().SendTaskAlert(ctx, task, "error", fmt.Sprintf("MergeWong 同步任务预警\n任务：%s\n状态：CDC 链路停止\n时间：%s\n原因：%s", task.Name, now.Format("2006-01-02 15:04:05"), err.Error()))
+		_ = NewAlertService().SendTaskAlertImmediate(ctx, task, "error", fmt.Sprintf("数据同步任务报错预警\n任务：%s\n状态：CDC 链路停止\n时间：%s\n原因：%s", task.Name, now.Format("2006-01-02 15:04:05"), err.Error()))
 	}
 }

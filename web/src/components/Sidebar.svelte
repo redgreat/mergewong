@@ -4,12 +4,14 @@
   export let token = "";
   export let view = "login";
   export let setView = (v) => {};
-  export let connectionTotal = 0;
-  export let taskTotal = 0;
-  export let logTotal = 0;
   export let sidebarCollapsed = false;
   export let toggleSidebar = () => {};
   export let role = "viewer";
+
+  function navigate(v) {
+    setView(v);
+    sidebarCollapsed = true;
+  }
 </script>
 
 <aside class="sidebar" class:collapsed={sidebarCollapsed}>
@@ -23,43 +25,31 @@
   </div>
   {#if token}
     <nav class="menu">
-      <button aria-label="数据库连接" title="数据库连接" class:active={view === "connections"} on:click={() => setView("connections")}>
+      <button aria-label="数据库连接" title="数据库连接" class:active={view === "connections"} on:click={() => navigate("connections")}>
         <span class="menu-icon"><Database size={18} /></span>
         <span class="menu-text">数据库连接</span>
       </button>
-      <button aria-label="同步任务" title="同步任务" class:active={view === "tasks"} on:click={() => setView("tasks")}>
+      <button aria-label="同步任务" title="同步任务" class:active={view === "tasks"} on:click={() => navigate("tasks")}>
         <span class="menu-icon"><Workflow size={18} /></span>
         <span class="menu-text">同步任务</span>
       </button>
-      <button aria-label="同步日志" title="同步日志" class:active={view === "logs"} on:click={() => setView("logs")}>
+      <button aria-label="同步日志" title="同步日志" class:active={view === "logs"} on:click={() => navigate("logs")}>
         <span class="menu-icon"><ScrollText size={18} /></span>
         <span class="menu-text">同步日志</span>
       </button>
-      <button aria-label="预警管理" title="预警管理" class:active={view === "alerts"} on:click={() => setView("alerts")}>
+      <button aria-label="预警管理" title="预警管理" class:active={view === "alerts"} on:click={() => navigate("alerts")}>
         <span class="menu-icon"><BellRing size={18} /></span>
         <span class="menu-text">预警管理</span>
       </button>
       {#if role === "admin"}
-        <button aria-label="用户管理" title="用户管理" class:active={view === "users"} on:click={() => setView("users")}>
+        <button aria-label="用户管理" title="用户管理" class:active={view === "users"} on:click={() => navigate("users")}>
           <span class="menu-icon"><UserRoundCog size={18} /></span>
           <span class="menu-text">用户管理</span>
         </button>
       {/if}
     </nav>
-    <div class="side-card">
-      <div class="side-title">概览</div>
-      <div class="side-stat">
-        <span>连接</span>
-        <strong>{connectionTotal}</strong>
-      </div>
-      <div class="side-stat">
-        <span>任务</span>
-        <strong>{taskTotal}</strong>
-      </div>
-      <div class="side-stat">
-        <span>日志</span>
-        <strong>{logTotal}</strong>
-      </div>
+    <div class="sidebar-footer">
+      <span class="sidebar-copyright">© 2026 数据同步</span>
     </div>
   {/if}
 </aside>

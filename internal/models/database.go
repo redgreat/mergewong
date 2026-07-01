@@ -23,7 +23,6 @@ type DatabaseConnection struct {
 	Charset   string         `gorm:"size:20;default:'utf8mb4'" json:"charset"`
 	MaxIdle   int            `gorm:"default:10" json:"max_idle"`
 	MaxOpen   int            `gorm:"default:100" json:"max_open"`
-	Status    int            `gorm:"default:1" json:"status"` // 1: 启用, 0: 禁用
 	UserID    uint           `gorm:"not null" json:"user_id"` // 创建者
 }
 
