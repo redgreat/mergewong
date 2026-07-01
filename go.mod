@@ -1,4 +1,4 @@
-module github.com/redgreat/apiwong
+module github.com/redgreat/mergewong
 
 go 1.21
 

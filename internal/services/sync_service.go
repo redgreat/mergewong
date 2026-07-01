@@ -8,8 +8,8 @@ import (
 	"regexp"
 	"time"
 
-	"github.com/redgreat/apiwong/internal/database"
-	"github.com/redgreat/apiwong/internal/models"
+	"github.com/redgreat/mergewong/internal/database"
+	"github.com/redgreat/mergewong/internal/models"
 	"gorm.io/gorm"
 )
 

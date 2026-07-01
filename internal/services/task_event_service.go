@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/redgreat/apiwong/internal/models"
+	"github.com/redgreat/mergewong/internal/models"
 )
 
 func (s *SyncService) RecordTaskEvent(task *models.SyncTask, eventType, phase, status, message, detail string, rows, duration int64) {

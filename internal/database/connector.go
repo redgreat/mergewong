@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/redgreat/apiwong/internal/config"
+	"github.com/redgreat/mergewong/internal/config"
 	"gorm.io/driver/mysql"
 	"gorm.io/driver/postgres"
 	"gorm.io/driver/sqlserver"

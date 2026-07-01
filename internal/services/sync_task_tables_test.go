@@ -3,7 +3,7 @@ package services
 import (
 	"testing"
 
-	"github.com/redgreat/apiwong/internal/models"
+	"github.com/redgreat/mergewong/internal/models"
 )
 
 func TestValidateTaskTables(t *testing.T) {

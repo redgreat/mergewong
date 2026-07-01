@@ -6,10 +6,10 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
-	"github.com/redgreat/apiwong/internal/config"
-	"github.com/redgreat/apiwong/internal/database"
-	"github.com/redgreat/apiwong/internal/models"
-	"github.com/redgreat/apiwong/internal/utils"
+	"github.com/redgreat/mergewong/internal/config"
+	"github.com/redgreat/mergewong/internal/database"
+	"github.com/redgreat/mergewong/internal/models"
+	"github.com/redgreat/mergewong/internal/utils"
 )
 
 // Claims JWT 声明

@@ -5,9 +5,9 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
-	"github.com/redgreat/apiwong/internal/models"
-	"github.com/redgreat/apiwong/internal/services"
-	"github.com/redgreat/apiwong/internal/utils"
+	"github.com/redgreat/mergewong/internal/models"
+	"github.com/redgreat/mergewong/internal/services"
+	"github.com/redgreat/mergewong/internal/utils"
 )
 
 type AlertHandler struct{ service *services.AlertService }

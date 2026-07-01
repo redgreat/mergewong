@@ -3,7 +3,7 @@ package scheduler
 import (
 	"testing"
 
-	"github.com/redgreat/apiwong/internal/models"
+	"github.com/redgreat/mergewong/internal/models"
 )
 
 func TestScheduleSpec(t *testing.T) {

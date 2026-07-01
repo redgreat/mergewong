@@ -7,9 +7,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/redgreat/apiwong/internal/database"
-	"github.com/redgreat/apiwong/internal/models"
-	"github.com/redgreat/apiwong/internal/services"
+	"github.com/redgreat/mergewong/internal/database"
+	"github.com/redgreat/mergewong/internal/models"
+	"github.com/redgreat/mergewong/internal/services"
 	"github.com/robfig/cron/v3"
 	"gorm.io/gorm"
 )

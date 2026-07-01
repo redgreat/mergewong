@@ -3,7 +3,7 @@ package services
 import (
 	"fmt"
 
-	"github.com/redgreat/apiwong/internal/database"
+	"github.com/redgreat/mergewong/internal/database"
 )
 
 // DBService 数据库服务

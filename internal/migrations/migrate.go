@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/redgreat/apiwong/internal/models"
-	"github.com/redgreat/apiwong/internal/utils"
+	"github.com/redgreat/mergewong/internal/models"
+	"github.com/redgreat/mergewong/internal/utils"
 	"gorm.io/gorm"
 )
 

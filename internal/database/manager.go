@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/redgreat/apiwong/internal/config"
+	"github.com/redgreat/mergewong/internal/config"
 	"gorm.io/gorm"
 )
 

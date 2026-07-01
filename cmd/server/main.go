@@ -13,14 +13,14 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/redgreat/apiwong/internal/config"
-	"github.com/redgreat/apiwong/internal/database"
-	"github.com/redgreat/apiwong/internal/handlers"
-	"github.com/redgreat/apiwong/internal/middleware"
-	"github.com/redgreat/apiwong/internal/migrations"
-	"github.com/redgreat/apiwong/internal/scheduler"
-	"github.com/redgreat/apiwong/internal/services"
-	"github.com/redgreat/apiwong/internal/utils"
+	"github.com/redgreat/mergewong/internal/config"
+	"github.com/redgreat/mergewong/internal/database"
+	"github.com/redgreat/mergewong/internal/handlers"
+	"github.com/redgreat/mergewong/internal/middleware"
+	"github.com/redgreat/mergewong/internal/migrations"
+	"github.com/redgreat/mergewong/internal/scheduler"
+	"github.com/redgreat/mergewong/internal/services"
+	"github.com/redgreat/mergewong/internal/utils"
 )
 
 func main() {

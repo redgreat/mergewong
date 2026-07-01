@@ -3,9 +3,9 @@ package services
 import (
 	"fmt"
 
-	"github.com/redgreat/apiwong/internal/config"
-	"github.com/redgreat/apiwong/internal/database"
-	"github.com/redgreat/apiwong/internal/models"
+	"github.com/redgreat/mergewong/internal/config"
+	"github.com/redgreat/mergewong/internal/database"
+	"github.com/redgreat/mergewong/internal/models"
 	"gorm.io/gorm"
 )
 

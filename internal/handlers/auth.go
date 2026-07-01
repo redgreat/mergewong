@@ -4,9 +4,9 @@ import (
 	"strconv"
 
 	"github.com/gin-gonic/gin"
-	"github.com/redgreat/apiwong/internal/middleware"
-	"github.com/redgreat/apiwong/internal/services"
-	"github.com/redgreat/apiwong/internal/utils"
+	"github.com/redgreat/mergewong/internal/middleware"
+	"github.com/redgreat/mergewong/internal/services"
+	"github.com/redgreat/mergewong/internal/utils"
 )
 
 // AuthHandler 认证处理器
