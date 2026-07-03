@@ -1,26 +1,171 @@
 <script>
   export let loginForm = { username: "", password: "" };
   export let onLogin = () => {};
+
+  let loading = false;
+
+  function handleSubmit(e) {
+    e.preventDefault();
+    loading = true;
+    onLogin().finally(() => (loading = false));
+  }
 </script>
 
-<section class="card login">
-  <div class="card-header">
-    <div>
-      <h2>登录管理台</h2>
-      <p>使用管理员账户进入系统</p>
+<div class="login-screen">
+  <div class="login-bg">
+    <div class="login-glow login-glow-a"></div>
+    <div class="login-glow login-glow-b"></div>
+  </div>
+
+  <div class="login-card">
+    <div class="login-brand">
+      <span class="login-logo"><img src="/favicon.png" alt="logo" width="28" height="28" style="border-radius:7px;display:block;" /></span>
+      <span class="login-title">MergeWong</span>
     </div>
+    <p class="login-subtitle">数据同步管理平台</p>
+
+    <form on:submit={handleSubmit}>
+      <label class="login-field">
+        <span>用户名</span>
+        <input type="text" bind:value={loginForm.username} placeholder="请输入用户名" autocomplete="username" />
+      </label>
+      <label class="login-field">
+        <span>密码</span>
+        <input type="password" bind:value={loginForm.password} placeholder="请输入密码" autocomplete="current-password" />
+      </label>
+      <button type="submit" class="login-btn" disabled={loading || !loginForm.username || !loginForm.password}>
+        {loading ? "登录中…" : "登 录"}
+      </button>
+    </form>
+
+    <p class="login-footer">© 2026 MergeWong</p>
   </div>
-  <div class="form-grid">
-    <label>
-      用户名
-      <input type="text" bind:value={loginForm.username} />
-    </label>
-    <label>
-      密码
-      <input type="password" bind:value={loginForm.password} />
-    </label>
-  </div>
-  <div class="actions">
-    <button on:click={onLogin}>登录</button>
-  </div>
-</section>
+</div>
+
+<style>
+  .login-screen {
+    position: fixed;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    background: var(--bg);
+  }
+
+  .login-bg {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+  }
+
+  .login-glow {
+    position: absolute;
+    border-radius: 50%;
+    filter: blur(100px);
+    opacity: .35;
+    animation: glowFloat 12s ease-in-out infinite alternate;
+  }
+
+  .login-glow-a {
+    width: 480px;
+    height: 480px;
+    background: var(--primary);
+    top: -120px;
+    left: -100px;
+  }
+
+  .login-glow-b {
+    width: 400px;
+    height: 400px;
+    background: var(--success);
+    bottom: -100px;
+    right: -80px;
+    animation-delay: -6s;
+  }
+
+  @keyframes glowFloat {
+    0% { transform: translate(0, 0) scale(1); }
+    100% { transform: translate(40px, 30px) scale(1.08); }
+  }
+
+  .login-card {
+    position: relative;
+    z-index: 1;
+    width: min(400px, calc(100vw - 48px));
+    padding: 40px 36px 28px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 18px;
+    box-shadow: var(--shadow);
+    animation: cardIn .3s ease;
+  }
+
+  @keyframes cardIn {
+    from { opacity: 0; transform: translateY(16px) scale(.98); }
+  }
+
+  .login-brand {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+  }
+
+  .login-logo {
+    display: inline-grid;
+    place-items: center;
+    width: 42px;
+    height: 42px;
+    border-radius: 11px;
+    background: var(--primary-soft);
+  }
+
+  .login-title {
+    font-size: 24px;
+    font-weight: 720;
+    letter-spacing: -.02em;
+    color: var(--text);
+  }
+
+  .login-subtitle {
+    margin: 8px 0 28px;
+    text-align: center;
+    color: var(--text-muted);
+    font-size: 13px;
+  }
+
+  .login-field {
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+    margin-bottom: 18px;
+  }
+
+  .login-field span {
+    color: var(--text-secondary);
+    font-size: 13px;
+    font-weight: 550;
+  }
+
+  .login-field input {
+    min-height: 44px;
+    border-radius: 10px;
+  }
+
+  .login-btn {
+    width: 100%;
+    min-height: 44px;
+    margin-top: 6px;
+    border-radius: 10px;
+    font-size: 15px;
+    letter-spacing: .04em;
+  }
+
+  .login-footer {
+    margin: 24px 0 0;
+    text-align: center;
+    color: var(--text-muted);
+    font-size: 12px;
+  }
+</style>

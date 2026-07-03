@@ -4,7 +4,7 @@ server:
 
 jwt:
   secret: "xxx"
-  expire_time: 24 # JWT 过期时间（小时）
+  expire_time: 4 # JWT 过期时间（小时）
 
 # 系统数据库（存储用户、任务配置等）
 databases:

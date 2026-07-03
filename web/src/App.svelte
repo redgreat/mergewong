@@ -23,7 +23,7 @@
   let toastKey = 0;
   let token = localStorage.getItem("token") || "";
   let currentUser = JSON.parse(localStorage.getItem("current-user") || "null") || {};
-  let view = token ? "connections" : "login";
+  let view = token ? "tasks" : "login";
   let sidebarCollapsed = localStorage.getItem("sidebar-expanded") !== "true";
   let theme = localStorage.getItem("theme") || "dark";
   let showConnectionModal = false;
@@ -155,7 +155,7 @@
       localStorage.setItem("token", token);
       currentUser = { id: data.user_id, username: data.username, role: data.role };
       localStorage.setItem("current-user", JSON.stringify(currentUser));
-      view = "connections";
+      view = "tasks";
       await loadConnections();
       await loadTaskConnections();
       await loadTasks();
@@ -632,6 +632,16 @@
   }
 </script>
 
+{#if !token}
+  <LoginPage {loginForm} onLogin={login} />
+  {#if apiError || apiInfo}
+    <div class="toast" class:error={!!apiError} class:info={!!apiInfo} role="status" aria-live="polite">
+      <span class="toast-icon">{#if apiError}<CircleAlert size={18} />{:else}<CircleCheck size={18} />{/if}</span>
+      <span>{apiError || apiInfo}</span>
+      <button class="toast-close" type="button" aria-label="关闭提示" on:click={() => setMessage("", "info")}><X size={15} /></button>
+    </div>
+  {/if}
+{:else}
 <div class="layout" data-theme={theme}>
   <Sidebar
     {token}
@@ -655,9 +665,7 @@
       {/if}
     {/key}
 
-    {#if view === "login"}
-      <LoginPage {loginForm} onLogin={login} />
-    {:else if view === "connections"}
+    {#if view === "connections"}
       <ConnectionsPage
         canManage={isAdmin}
         connections={connections}
@@ -756,5 +764,5 @@
     <AlertModal open={showAlertModal} editing={!!editingAlertId} form={alertForm} onClose={closeAlertModal} onSave={saveAlert} />
   </main>
 </div>
+{/if}
 
- 
