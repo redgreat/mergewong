@@ -54,7 +54,7 @@ migrate: ## 运行数据库迁移
 	go run ./cmd/server/main.go
 
 release: ## 发布版本
-	@echo "准备发布..."
+	@echo "Preparing release..."
 ifeq ($(OS),Windows_NT)
 	powershell -ExecutionPolicy Bypass -File script\release.ps1
 else
