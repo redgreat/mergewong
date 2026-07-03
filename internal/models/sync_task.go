@@ -48,9 +48,12 @@ type SyncTask struct {
 	LastRunMessage    string             `gorm:"type:text" json:"last_run_message"` // 最后执行消息
 	LastSuccessAt     *time.Time         `json:"last_success_at"`
 	UserID            uint               `gorm:"not null" json:"user_id"`                 // 创建者
-	AlertChannelID    *uint              `gorm:"index" json:"alert_channel_id,omitempty"` // 预警发送方
-	AlertChannel      *AlertChannel      `gorm:"foreignKey:AlertChannelID" json:"alert_channel,omitempty"`
-	AlertDelaySeconds int                `gorm:"not null;default:0" json:"alert_delay_seconds"` // 延迟预警阈值（秒）
+	AlertChannelID     *uint              `gorm:"index" json:"alert_channel_id,omitempty"` // 预警发送方
+	AlertChannel       *AlertChannel      `gorm:"foreignKey:AlertChannelID" json:"alert_channel,omitempty"`
+	AlertDelaySeconds  int                `gorm:"not null;default:0" json:"alert_delay_seconds"`   // 延迟预警阈值（秒）
+	AlertStoppedMinutes int               `gorm:"not null;default:0" json:"alert_stopped_minutes"` // 停止预警阈值（分钟）
+	AlertOnError       bool               `gorm:"not null;default:true" json:"alert_on_error"`     // 执行报错时预警
+	AlertCooldownMinutes int              `gorm:"not null;default:30" json:"alert_cooldown_minutes"` // 预警重复间隔（分钟）
 	ValidationStatus  string             `gorm:"size:20;not null;default:legacy" json:"validation_status"`
 	RuntimeStatus     string             `gorm:"size:30;not null;default:stopped;index" json:"runtime_status"`
 	RowsProcessed     int64              `gorm:"not null;default:0" json:"rows_processed"`

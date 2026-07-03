@@ -25,19 +25,22 @@ func NewSyncHandler() *SyncHandler {
 
 // CreateTaskRequest 创建任务请求
 type CreateTaskRequest struct {
-	Name              string             `json:"name" binding:"required"`
-	SourceDB          string             `json:"source_db" binding:"required"`
-	SourceTable       string             `json:"source_table"`
-	TargetDB          string             `json:"target_db" binding:"required"`
-	TargetTable       string             `json:"target_table"`
-	Tables            []TaskTableRequest `json:"tables"`
-	FieldMapping      map[string]string  `json:"field_mapping"`
-	SyncType          string             `json:"sync_type" binding:"required,oneof=full cdc full_cdc"`
-	CronExpression    string             `json:"cron_expression"`
-	ScheduleType      string             `json:"schedule_type" binding:"required,oneof=manual interval cron"`
-	IntervalMinutes   int                `json:"interval_minutes"`
-	AlertChannelID    *uint              `json:"alert_channel_id"`
-	AlertDelaySeconds int                `json:"alert_delay_seconds"`
+	Name                 string             `json:"name" binding:"required"`
+	SourceDB             string             `json:"source_db" binding:"required"`
+	SourceTable          string             `json:"source_table"`
+	TargetDB             string             `json:"target_db" binding:"required"`
+	TargetTable          string             `json:"target_table"`
+	Tables               []TaskTableRequest `json:"tables"`
+	FieldMapping         map[string]string  `json:"field_mapping"`
+	SyncType             string             `json:"sync_type" binding:"required,oneof=full cdc full_cdc"`
+	CronExpression       string             `json:"cron_expression"`
+	ScheduleType         string             `json:"schedule_type" binding:"required,oneof=manual interval cron"`
+	IntervalMinutes      int                `json:"interval_minutes"`
+	AlertChannelID       *uint              `json:"alert_channel_id"`
+	AlertDelaySeconds    int                `json:"alert_delay_seconds"`
+	AlertStoppedMinutes  int                `json:"alert_stopped_minutes"`
+	AlertOnError         bool               `json:"alert_on_error"`
+	AlertCooldownMinutes int                `json:"alert_cooldown_minutes"`
 }
 
 type TaskTableRequest struct {
@@ -56,20 +59,23 @@ func (h *SyncHandler) CreateTask(c *gin.Context) {
 
 	userID, _ := c.Get("user_id")
 	task := &models.SyncTask{
-		Name:              req.Name,
-		SourceDB:          req.SourceDB,
-		SourceTable:       req.SourceTable,
-		TargetDB:          req.TargetDB,
-		TargetTable:       req.TargetTable,
-		FieldMapping:      req.FieldMapping,
-		SyncType:          req.SyncType,
-		CronExpression:    req.CronExpression,
-		ScheduleType:      req.ScheduleType,
-		IntervalMinutes:   req.IntervalMinutes,
-		AlertChannelID:    req.AlertChannelID,
-		AlertDelaySeconds: req.AlertDelaySeconds,
-		Status:            1,
-		UserID:            userID.(uint),
+		Name:                 req.Name,
+		SourceDB:             req.SourceDB,
+		SourceTable:          req.SourceTable,
+		TargetDB:             req.TargetDB,
+		TargetTable:          req.TargetTable,
+		FieldMapping:         req.FieldMapping,
+		SyncType:             req.SyncType,
+		CronExpression:       req.CronExpression,
+		ScheduleType:         req.ScheduleType,
+		IntervalMinutes:      req.IntervalMinutes,
+		AlertChannelID:       req.AlertChannelID,
+		AlertDelaySeconds:    req.AlertDelaySeconds,
+		AlertStoppedMinutes:  req.AlertStoppedMinutes,
+		AlertOnError:         req.AlertOnError,
+		AlertCooldownMinutes: req.AlertCooldownMinutes,
+		Status:               1,
+		UserID:               userID.(uint),
 	}
 
 	tableRequests := req.Tables
@@ -128,9 +134,12 @@ func (h *SyncHandler) GetTask(c *gin.Context) {
 
 // UpdateTaskRequest 更新任务请求
 type UpdateTaskRequest struct {
-	AlertChannelID    uint               `json:"alert_channel_id"`
-	AlertDelaySeconds int                `json:"alert_delay_seconds"`
-	Tables            []TaskTableRequest `json:"tables"`
+	AlertChannelID       *uint              `json:"alert_channel_id"`
+	AlertDelaySeconds    int                `json:"alert_delay_seconds"`
+	AlertStoppedMinutes  *int               `json:"alert_stopped_minutes"`
+	AlertOnError         *bool              `json:"alert_on_error"`
+	AlertCooldownMinutes *int               `json:"alert_cooldown_minutes"`
+	Tables               []TaskTableRequest `json:"tables"`
 }
 
 // UpdateTask 更新任务（仅允许修改同步对象和预警策略）
@@ -152,7 +161,11 @@ func (h *SyncHandler) UpdateTask(c *gin.Context) {
 		utils.BadRequest(c, "预警时间配置不正确")
 		return
 	}
-	if err := h.syncService.ValidateAlertChannelID(req.AlertChannelID); err != nil {
+	channelID := uint(0)
+	if req.AlertChannelID != nil {
+		channelID = *req.AlertChannelID
+	}
+	if err := h.syncService.ValidateAlertChannelID(channelID); err != nil {
 		utils.BadRequest(c, err.Error())
 		return
 	}
@@ -160,10 +173,19 @@ func (h *SyncHandler) UpdateTask(c *gin.Context) {
 	updates := map[string]interface{}{
 		"alert_delay_seconds": req.AlertDelaySeconds,
 	}
-	if req.AlertChannelID == 0 {
+	if req.AlertStoppedMinutes != nil {
+		updates["alert_stopped_minutes"] = *req.AlertStoppedMinutes
+	}
+	if req.AlertOnError != nil {
+		updates["alert_on_error"] = *req.AlertOnError
+	}
+	if req.AlertCooldownMinutes != nil {
+		updates["alert_cooldown_minutes"] = *req.AlertCooldownMinutes
+	}
+	if req.AlertChannelID == nil || *req.AlertChannelID == 0 {
 		updates["alert_channel_id"] = nil
 	} else {
-		updates["alert_channel_id"] = req.AlertChannelID
+		updates["alert_channel_id"] = *req.AlertChannelID
 	}
 
 	if err := h.syncService.UpdateTask(uint(id), updates); err != nil {

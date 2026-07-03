@@ -53,8 +53,12 @@ func (s *AlertService) SendTaskAlert(ctx context.Context, task *models.SyncTask,
 		state.SilentAt = nil
 	}
 
-	// 检查发送间隔
-	if state.LastSentAt != nil && now.Sub(*state.LastSentAt) < alertIntervalMinutes*time.Minute {
+	// 检查发送间隔（使用任务配置的冷却时间）
+	cooldown := task.AlertCooldownMinutes
+	if cooldown < 1 {
+		cooldown = alertIntervalMinutes
+	}
+	if state.LastSentAt != nil && now.Sub(*state.LastSentAt) < time.Duration(cooldown)*time.Minute {
 		return nil
 	}
 
@@ -128,7 +132,7 @@ func (s *AlertService) ResolveTaskAlertSilent(taskID uint, alertType string) err
 		Updates(map[string]interface{}{"active": false, "alert_count": 0, "silent_at": nil}).Error
 }
 
-// CheckTaskAlerts 检测运行延迟预警
+// CheckTaskAlerts 检测运行延迟和停止预警
 func (s *AlertService) CheckTaskAlerts(ctx context.Context) error {
 	var tasks []models.SyncTask
 	if err := s.systemDB.Preload("AlertChannel").
@@ -164,6 +168,25 @@ func (s *AlertService) CheckTaskAlerts(ctx context.Context) error {
 			} else {
 				_ = s.ResolveTaskAlertSilent(task.ID, "delay")
 			}
+		}
+
+		// 停止预警：仅对定时任务生效，CDC 任务持续运行不适用
+		stoppedThreshold := int64(task.AlertStoppedMinutes)
+		if stoppedThreshold > 0 && task.SyncType != "cdc" && task.SyncType != "full_cdc" {
+			if task.LastRunAt != nil {
+				elapsed := int64(now.Sub(*task.LastRunAt).Minutes())
+				if task.LastRunStatus != "running" && elapsed >= stoppedThreshold {
+					content := fmt.Sprintf("MergeWong 任务停止预警\n任务：%s\n距上次启动：%d 分钟\n阈值：%d 分钟",
+						task.Name, elapsed, stoppedThreshold)
+					_ = s.SendTaskAlert(ctx, task, "stopped", content)
+				} else {
+					_ = s.ResolveTaskAlertSilent(task.ID, "stopped")
+				}
+			} else {
+				_ = s.ResolveTaskAlertSilent(task.ID, "stopped")
+			}
+		} else {
+			_ = s.ResolveTaskAlertSilent(task.ID, "stopped")
 		}
 	}
 	return nil
@@ -204,7 +227,7 @@ func (s *AlertService) List(page, pageSize int, enabledOnly bool) ([]models.Aler
 		views = append(views, models.AlertChannelView{
 			ID: channel.ID, Name: channel.Name,
 			RobotIDMask: maskRobotID(channel.RobotID),
-			Status: channel.Status, CreatedAt: channel.CreatedAt, UpdatedAt: channel.UpdatedAt,
+			Status:      channel.Status, CreatedAt: channel.CreatedAt, UpdatedAt: channel.UpdatedAt,
 		})
 	}
 	return views, total, nil
