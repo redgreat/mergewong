@@ -7,6 +7,7 @@
   import LoginPage from "./pages/LoginPage.svelte";
   import ConnectionsPage from "./pages/ConnectionsPage.svelte";
   import TasksPage from "./pages/TasksPage.svelte";
+  import TaskDetailPage from "./pages/TaskDetailPage.svelte";
   import LogsPage from "./pages/LogsPage.svelte";
   import ConnectionModal from "./components/ConnectionModal.svelte";
   import TaskModal from "./components/TaskModal.svelte";
@@ -659,7 +660,7 @@
     {:else if view === "connections"}
       <ConnectionsPage
         canManage={isAdmin}
-        {connections}
+        connections={connections}
         {tasks}
         {connectionPage}
         {connectionPageSize}
@@ -675,7 +676,7 @@
     {:else if view === "tasks"}
       <TasksPage
         canManage={isAdmin}
-        {tasks}
+        tasks={tasks}
         {taskPage}
         {taskPageSize}
         {taskTotal}
@@ -685,14 +686,21 @@
         onEdit={(t) => openTaskModal("edit", t)}
 		onPause={(t) => pauseTask(t)}
 		onResume={(t) => resumeTask(t)}
-		onUpdateCheckpoint={(t, checkpoint) => updateTaskCheckpoint(t, checkpoint)}
+        onUpdateCheckpoint={(t, checkpoint) => updateTaskCheckpoint(t, checkpoint)}
         onDelete={(t) => deleteTask(t)}
+        onRefresh={loadTasks}
+        onDetail={(t) => { logTaskId = String(t.id); view = "task_detail"; loadTasks(); }}
+      />
+    {:else if view === "task_detail"}
+      <TaskDetailPage
+        task={tasks.find(t => String(t.id) === String(logTaskId)) || {}}
+        onBack={() => { view = "tasks"; }}
         onRefresh={loadTasks}
       />
     {:else if view === "logs"}
       <LogsPage
         {tasks}
-        {logTaskId}
+        bind:logTaskId
         {logs}
         {logPage}
         {logPageSize}

@@ -136,7 +136,12 @@ type UpdateTaskRequest struct {
 // UpdateTask 更新任务（仅允许修改同步对象和预警策略）
 func (h *SyncHandler) UpdateTask(c *gin.Context) {
 	id, _ := strconv.ParseUint(c.Param("id"), 10, 32)
-	services.GetCDCManager().StopTask(uint(id))
+	currentTask, err := h.syncService.GetTask(uint(id))
+	if err != nil {
+		utils.Error(c, 404, "任务不存在")
+		return
+	}
+	running := currentTask.RuntimeStatus == "initializing" || currentTask.RuntimeStatus == "catching_up" || currentTask.RuntimeStatus == "cdc_running"
 
 	var req UpdateTaskRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -170,8 +175,15 @@ func (h *SyncHandler) UpdateTask(c *gin.Context) {
 		for _, table := range req.Tables {
 			tables = append(tables, models.SyncTaskTable{SourceTable: table.SourceTable, TargetTable: table.TargetTable, FieldMapping: table.FieldMapping})
 		}
-		if err := h.syncService.ReplaceTaskTables(uint(id), tables); err != nil {
-			utils.InternalServerError(c, "更新同步对象失败: "+err.Error())
+		var tableErr error
+		if running {
+			_, tableErr = h.syncService.AddTaskTablesOnline(uint(id), tables)
+		} else {
+			services.GetCDCManager().StopTask(uint(id))
+			tableErr = h.syncService.ReplaceTaskTables(uint(id), tables)
+		}
+		if tableErr != nil {
+			utils.InternalServerError(c, "更新同步对象失败: "+tableErr.Error())
 			return
 		}
 	}
@@ -181,10 +193,9 @@ func (h *SyncHandler) UpdateTask(c *gin.Context) {
 		return
 	}
 
-	utils.SuccessWithMessage(c, "更新成功", nil)
+	utils.SuccessWithMessage(c, "更新成功", gin.H{"online_onboarding": running})
 	h.syncService.RecordTaskEvent(updatedTask, "task_updated", "config", "success", "同步任务配置已修改", "", 0, 0)
 }
-
 
 // DeleteTask 删除任务
 func (h *SyncHandler) DeleteTask(c *gin.Context) {

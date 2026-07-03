@@ -101,11 +101,10 @@
       <div class="wizard-body">
         {#if step === 1}
           <div class="form-grid wizard-grid">
-            <label class="full">任务名称<input type="text" bind:value={form.name} placeholder="例如：订单数据同步" /></label>
-            <label>源库连接<select value={form.source_db} on:change={changeSourceDB}><option value="">请选择源端连接</option>{#each connections.filter((connection) => connection.status === 1 && (connection.usage === "source" || connection.usage === "both" || !connection.usage)) as connection}<option value={connection.name}>{connection.name}</option>{/each}</select></label>
-            <label>目标库连接<select bind:value={form.target_db}><option value="">请选择目标端连接</option>{#each connections.filter((connection) => connection.status === 1 && (connection.usage === "target" || connection.usage === "both" || !connection.usage)) as connection}<option value={connection.name}>{connection.name}</option>{/each}</select></label>
-            <label>同步类型<select bind:value={form.sync_type}><option value="full_cdc">全量初始化 + Binlog CDC</option><option value="cdc">仅 Binlog CDC</option><option value="full">仅全量初始化</option></select></label>
-            {#if editing}<label>任务状态<select bind:value={form.status}><option value="1">启用</option><option value="0">禁用</option></select></label>{/if}
+            <label class="full">任务名称<input type="text" bind:value={form.name} placeholder="例如：订单数据同步" disabled={editing} /></label>
+            <label>源库连接<select value={form.source_db} on:change={changeSourceDB} disabled={editing}><option value="">请选择源端连接</option>{#each connections.filter((connection) => connection.usage === "source" || connection.usage === "both" || !connection.usage) as connection}<option value={connection.name}>{connection.name}</option>{/each}</select></label>
+            <label>目标库连接<select bind:value={form.target_db} disabled={editing}><option value="">请选择目标端连接</option>{#each connections.filter((connection) => connection.usage === "target" || connection.usage === "both" || !connection.usage) as connection}<option value={connection.name}>{connection.name}</option>{/each}</select></label>
+            <label>同步类型<select bind:value={form.sync_type} disabled={editing}><option value="full_cdc">全量初始化 + Binlog CDC</option><option value="cdc">仅 Binlog CDC</option><option value="full">仅全量初始化</option></select></label>
           </div>
         {:else if step === 2}
           <div class="object-picker">
@@ -141,10 +140,12 @@
           </div>
           <div class="form-grid wizard-grid compact-grid">
             <label>预警发送方<select bind:value={form.alert_channel_id}><option value="">不发送预警</option>{#each alertChannels as channel}<option value={channel.id}>{channel.name}</option>{/each}</select></label>
-            <label>运行延迟阈值（分钟）<input type="number" min="0" bind:value={form.alert_delay_minutes} /></label>
+			<label>同步延迟阈值（ms）<input type="number" min="0" bind:value={form.alert_delay_ms} placeholder="默认5000" /></label>
+            {#if !editing}
             <label>停止阈值（分钟）<input type="number" min="0" bind:value={form.alert_stopped_minutes} disabled={form.sync_type === "full"} /></label>
             <label>重复提醒间隔（分钟）<input type="number" min="1" bind:value={form.alert_cooldown_minutes} /></label>
             <label class="checkbox-label"><input type="checkbox" bind:checked={form.alert_on_error} />执行报错时立即预警</label>
+            {/if}
           </div>
         {:else}
           <div class="precheck-summary" class:passed={precheckResult?.passed}>

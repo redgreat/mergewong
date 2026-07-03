@@ -66,6 +66,12 @@ func (s *SyncService) syncValidatedTable(task *models.SyncTask, mapping *models.
 		return 0, nil
 	}
 	checkpoint.TaskTableID = mapping.ID
+	var sourceTotal int64
+	if err := sourceDB.Table(mapping.SourceTable).Count(&sourceTotal).Error; err != nil {
+		return 0, err
+	}
+	processed := mapping.SnapshotProcessed
+	_ = s.systemDB.Model(mapping).Updates(map[string]interface{}{"sync_state": "initializing", "snapshot_total": sourceTotal, "progress_message": "正在全量初始化"}).Error
 	var total int64
 	for {
 		var runtime struct{ RuntimeStatus string }
@@ -80,11 +86,15 @@ func (s *SyncService) syncValidatedTable(task *models.SyncTask, mapping *models.
 			return total, err
 		}
 		if len(batch) == 0 {
-			if task.SyncType == "full" {
-				checkpoint.Completed = true
-				if err := saveCheckpoint(s.systemDB, &checkpoint); err != nil {
-					return total, err
-				}
+			checkpoint.Completed = true
+			if err := saveCheckpoint(s.systemDB, &checkpoint); err != nil {
+				return total, err
+			}
+			if err := s.systemDB.Model(mapping).Updates(map[string]interface{}{"sync_state": "snapshot_completed", "snapshot_processed": sourceTotal, "progress_percent": 100, "progress_message": "全量初始化完成"}).Error; err != nil {
+				return total, err
+			}
+			if current, loadErr := s.GetTask(task.ID); loadErr == nil {
+				s.RecordTaskEvent(current, "table_snapshot_completed", "snapshot", "success", "表全量初始化完成", fmt.Sprintf("%s：%d 行", mapping.SourceTable, sourceTotal), sourceTotal, 0)
 			}
 			return total, nil
 		}
@@ -96,6 +106,17 @@ func (s *SyncService) syncValidatedTable(task *models.SyncTask, mapping *models.
 			return total, err
 		}
 		total += int64(len(batch))
+		processed += int64(len(batch))
+		percent := float64(100)
+		if sourceTotal > 0 {
+			percent = float64(processed) * 100 / float64(sourceTotal)
+			if percent > 100 {
+				percent = 100
+			}
+		}
+		if err := s.systemDB.Model(mapping).Updates(map[string]interface{}{"snapshot_processed": processed, "snapshot_total": sourceTotal, "progress_percent": percent, "progress_message": fmt.Sprintf("已初始化 %d / %d 行", processed, sourceTotal)}).Error; err != nil {
+			return total, err
+		}
 	}
 }
 

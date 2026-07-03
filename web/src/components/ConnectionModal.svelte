@@ -52,9 +52,13 @@
           端口
           <input type="number" min="1" max="65535" bind:value={form.port} />
         </label>
-        <label class="full">
+        <label>
           数据库名称
           <input type="text" bind:value={form.database} placeholder="填写 database / schema 所属数据库" autocomplete="off" />
+        </label>
+        <label>
+          字符集
+          <input type="text" bind:value={form.charset} placeholder="utf8mb4" />
         </label>
         <label>
           用户名
@@ -63,10 +67,6 @@
         <label>
           密码
           <input type="password" bind:value={form.password} placeholder={editing ? "留空表示不修改" : "请输入数据库密码"} autocomplete="new-password" />
-        </label>
-        <label>
-          字符集
-          <input type="text" bind:value={form.charset} placeholder="utf8mb4" />
         </label>
         <label>
           最大空闲连接

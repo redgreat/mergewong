@@ -107,7 +107,7 @@ func (s *DBService) ListTables(dbName string) ([]string, error) {
 	var query string
 	switch db.Dialector.Name() {
 	case "mysql":
-		query = "SHOW TABLES"
+		query = "SELECT TABLE_NAME FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_TYPE = 'BASE TABLE' ORDER BY TABLE_NAME"
 	case "postgres":
 		query = "SELECT table_name FROM information_schema.tables WHERE table_schema = current_schema() AND table_type = 'BASE TABLE' ORDER BY table_name"
 	case "sqlserver":

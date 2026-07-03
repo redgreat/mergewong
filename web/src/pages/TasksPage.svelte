@@ -1,7 +1,7 @@
 <script>
   import { CircleAlert, EllipsisVertical, RefreshCw, Workflow, X } from "lucide-svelte";
   export let tasks = [], taskPage = 1, taskPageSize = 10, taskTotal = 0, canManage = false;
-  export let onPrev = () => {}, onNext = () => {}, onOpenNew = () => {}, onEdit = () => {}, onDelete = () => {}, onRefresh = () => {};
+	export let onPrev = () => {}, onNext = () => {}, onOpenNew = () => {}, onEdit = () => {}, onDetail = () => {}, onDelete = () => {}, onRefresh = () => {};
   export let onPause = () => {}, onResume = () => {}, onUpdateCheckpoint = () => {};
   let menuTaskId = null;
   let detailTask = null;
@@ -12,7 +12,7 @@
 
   const statusText = (task) => ({ pending: "待预检查", initializing: "全量初始化", catching_up: "增量追数", cdc_running: "增量同步中", paused: "暂停", stopped: "停止", completed: "完成", failed: "失败" }[task.validation_status === "pending" ? "pending" : task.runtime_status] || "停止");
   const statusClass = (task) => task.runtime_status === "failed" ? "danger" : ["initializing", "catching_up", "cdc_running"].includes(task.runtime_status) ? "success" : "muted";
-  const delayText = (seconds) => seconds == null ? "-" : seconds < 60 ? `${seconds} 秒` : `${Math.floor(seconds / 60)} 分 ${seconds % 60} 秒`;
+  const delayText = (seconds) => seconds == null ? "-" : `${(seconds * 1000).toLocaleString()} ms`;
   const speedText = (speed) => speed > 0 ? `${speed >= 1000 ? (speed / 1000).toFixed(1) + "k" : speed.toFixed(1)} 行/秒` : "-";
   const canDelete = (task) => ["paused", "stopped", "completed"].includes(task.runtime_status);
 
@@ -31,13 +31,13 @@
 
 <svelte:window on:click={handleOutside} />
 <section class="workspace-panel task-workspace">
-  <div class="card-header"><h2>同步任务</h2><div class="header-actions"><span class="record-count">共 {taskTotal} 个任务</span><button class="ghost icon-text" on:click={onRefresh}><RefreshCw size={15} />刷新</button>{#if canManage}<button on:click={onOpenNew}>新增任务</button>{/if}</div></div>
+  <div class="card-header"><div></div><div class="header-actions"><span class="record-count">共 {taskTotal} 个任务</span><button class="ghost icon-text" on:click={onRefresh}><RefreshCw size={15} />刷新</button>{#if canManage}<button on:click={onOpenNew}>新增任务</button>{/if}</div></div>
   <table class="data-table task-monitor-table">
     <thead><tr><th>名称</th><th>源连接</th><th>目标连接</th><th>类型</th><th>状态</th><th>同步延迟</th><th>同步速率</th><th>预警</th>{#if canManage}<th>操作</th>{/if}</tr></thead>
     <tbody>
       {#each tasks as task}
         <tr>
-          <td><strong>{task.name}</strong>{#if task.task_tables?.length > 1}<span class="cell-sub">{task.task_tables.length} 张表</span>{/if}</td>
+		  <td><button class="task-name-link" on:click={() => onDetail(task)}>{task.name}</button>{#if task.task_tables?.length > 1}<span class="cell-sub">{task.task_tables.length} 张表</span>{/if}</td>
           <td>{task.source_db}</td><td>{task.target_db}</td>
           <td>{task.sync_type === "full_cdc" ? "全量 + CDC" : task.sync_type === "cdc" ? "Binlog CDC" : "全量"}</td>
           <td><button class={`status-link ${statusClass(task)}`} class:clickable={task.runtime_status === "failed"} disabled={task.runtime_status !== "failed"} on:click={() => (detailTask = task)}>{#if task.runtime_status === "failed"}<CircleAlert size={14} />{/if}{statusText(task)}</button></td>
@@ -45,6 +45,7 @@
           {#if canManage}<td><div class="task-operation"><button class="icon-button" aria-label={`操作 ${task.name}`} on:click|stopPropagation={() => (menuTaskId = menuTaskId === task.id ? null : task.id)}><EllipsisVertical size={17} /></button>{#if menuTaskId === task.id}<div class="operation-menu">
             {#if ["initializing", "catching_up", "cdc_running"].includes(task.runtime_status)}<button on:click={() => { menuTaskId = null; onPause(task); }}>暂停</button>{:else}<button disabled={task.validation_status !== "passed"} on:click={() => { menuTaskId = null; onResume(task); }}>开始</button>{/if}
             <button on:click={() => { menuTaskId = null; onEdit(task); }}>修改同步对象</button>
+			<button on:click={() => { menuTaskId = null; onDetail(task); }}>详情</button>
             <button disabled={task.runtime_status !== "paused" || task.sync_type === "full"} on:click={() => openCheckpoint(task)}>修改 Binlog 位点</button>
             <button class="danger-text" disabled={!canDelete(task)} on:click={() => { deleteTask = task; menuTaskId = null; }}>删除</button>
           </div>{/if}</div></td>{/if}

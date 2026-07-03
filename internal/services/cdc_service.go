@@ -32,6 +32,7 @@ type CDCManager struct {
 type cdcWorker struct {
 	id     uint64
 	cancel context.CancelFunc
+	done   chan struct{}
 }
 
 var cdcManager *CDCManager
@@ -69,12 +70,17 @@ func (m *CDCManager) StartTask(taskID uint) error {
 	m.mu.Lock()
 	m.nextID++
 	workerID := m.nextID
-	m.workers[taskID] = cdcWorker{id: workerID, cancel: cancel}
+	done := make(chan struct{})
+	m.workers[taskID] = cdcWorker{id: workerID, cancel: cancel, done: done}
 	m.mu.Unlock()
 	go func() {
-		if err := m.run(ctx, task); err != nil && ctx.Err() == nil {
+		defer close(done)
+		err := m.run(ctx, task)
+		if err != nil && ctx.Err() == nil {
 			log.Printf("CDC 任务 %d 停止: %v", taskID, err)
 			m.service.recordCDCFailure(task, err)
+		} else {
+			m.service.recordCDCStopped(task)
 		}
 		m.mu.Lock()
 		if worker, ok := m.workers[taskID]; ok && worker.id == workerID {
@@ -88,11 +94,19 @@ func (m *CDCManager) StartTask(taskID uint) error {
 func (m *CDCManager) StopTask(taskID uint) {
 	m.mu.Lock()
 	worker := m.workers[taskID]
-	delete(m.workers, taskID)
 	m.mu.Unlock()
 	if worker.cancel != nil {
 		worker.cancel()
+		select {
+		case <-worker.done:
+		case <-time.After(10 * time.Second):
+		}
 	}
+	m.mu.Lock()
+	if current, ok := m.workers[taskID]; ok && current.id == worker.id {
+		delete(m.workers, taskID)
+	}
+	m.mu.Unlock()
 }
 
 func (m *CDCManager) IsRunning(taskID uint) bool {
@@ -151,6 +165,9 @@ func (m *CDCManager) run(ctx context.Context, task *models.SyncTask) error {
 			return err
 		}
 	}
+	activatedAt := time.Now()
+	_ = m.service.systemDB.Model(&models.SyncTaskTable{}).Where("task_id = ? AND COALESCE(onboarding_file, '') = '' AND sync_state IN ?", task.ID, []string{"pending", "snapshot_completed"}).Updates(map[string]interface{}{"sync_state": "active", "progress_percent": 100, "activated_at": &activatedAt, "progress_message": "已合并到主同步链路"}).Error
+	task, _ = m.service.GetTask(task.ID)
 	return m.stream(ctx, task, &source, checkpoint)
 }
 
@@ -229,7 +246,9 @@ func (m *CDCManager) stream(ctx context.Context, task *models.SyncTask, source *
 	}
 	mappings := map[string]*models.SyncTaskTable{}
 	for i := range task.TaskTables {
-		mappings[task.TaskTables[i].SourceTable] = &task.TaskTables[i]
+		if task.TaskTables[i].SyncState == "active" {
+			mappings[task.TaskTables[i].SourceTable] = &task.TaskTables[i]
+		}
 	}
 	columnCache := map[string][]string{}
 	var operations []cdcOperation
@@ -238,7 +257,12 @@ func (m *CDCManager) stream(ctx context.Context, task *models.SyncTask, source *
 	lastMetricsUpdate := time.Time{}
 	var sessionRows int64
 	_ = m.service.UpdateTask(task.ID, map[string]interface{}{"runtime_status": "catching_up", "phase_started_at": &streamStarted, "last_run_message": "增量追数中"})
-	m.service.RecordTaskEvent(task, "cdc_started", "cdc", "running", "Binlog 增量同步开始", fmt.Sprintf("起始位点 %s:%d", checkpoint.BinlogFile, checkpoint.BinlogPosition), 0, 0)
+	
+	startTitle := "Binlog 增量同步开始"
+	if checkpoint.SnapshotCompleted && task.RowsProcessed > 0 {
+		startTitle = "Binlog 增量同步继续"
+	}
+	m.service.RecordTaskEvent(task, "cdc_started", "cdc", "running", startTitle, fmt.Sprintf("起始位点 %s:%d", checkpoint.BinlogFile, checkpoint.BinlogPosition), 0, 0)
 	for {
 		event, err := streamer.GetEvent(ctx)
 		if err != nil {
@@ -393,4 +417,13 @@ func (s *SyncService) recordCDCFailure(task *models.SyncTask, err error) {
 		defer cancel()
 		_ = NewAlertService().SendTaskAlertImmediate(ctx, task, "error", fmt.Sprintf("数据同步任务报错预警\n任务：%s\n状态：CDC 链路停止\n时间：%s\n原因：%s", task.Name, now.Format("2006-01-02 15:04:05"), err.Error()))
 	}
+}
+
+func (s *SyncService) recordCDCStopped(task *models.SyncTask) {
+	var checkpoint models.SyncCDCCheckpoint
+	detail := ""
+	if err := s.systemDB.Where("task_id = ?", task.ID).First(&checkpoint).Error; err == nil {
+		detail = fmt.Sprintf("停留位点 %s:%d", checkpoint.BinlogFile, checkpoint.BinlogPosition)
+	}
+	s.RecordTaskEvent(task, "cdc_stopped", "cdc", "success", "Binlog 增量同步已停止", detail, 0, 0)
 }

@@ -16,8 +16,8 @@
 
 <section class="workspace-panel">
   <div class="card-header">
-    <div><h2>预警发送规则</h2><p>维护同步任务失败时使用的企业微信群机器人。</p></div>
-    <div class="header-actions"><span class="record-count">共 {alertTotal} 个发送群</span><button class="ghost icon-text" on:click={onRefresh}><RefreshCw size={15} />刷新</button>{#if canManage}<button on:click={onOpenNew}>新增发送群</button>{/if}</div>
+    <div></div>
+    <div class="header-actions"><span class="record-count">共 {alertTotal} 个群组</span><button class="ghost icon-text" on:click={onRefresh}><RefreshCw size={15} />刷新</button>{#if canManage}<button on:click={onOpenNew}>新建群组</button>{/if}</div>
   </div>
   <table class="data-table">
     <thead><tr><th>发送群名称</th><th>发送方式</th><th>机器人 ID</th><th>状态</th>{#if canManage}<th>操作</th>{/if}</tr></thead>

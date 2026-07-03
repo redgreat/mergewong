@@ -68,6 +68,7 @@ func main() {
 		log.Fatalf("启动定时任务失败: %v", err)
 	}
 	services.GetCDCManager().StartAll()
+	services.NewSyncService().ResumePendingTableOnboarding()
 
 	if config.AppConfig.Server.Mode != "" {
 		gin.SetMode(config.AppConfig.Server.Mode)

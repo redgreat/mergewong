@@ -27,38 +27,38 @@ func (fm FieldMapping) Value() (driver.Value, error) {
 
 // SyncTask 同步任务
 type SyncTask struct {
-	ID                   uint               `gorm:"primarykey" json:"id"`
-	CreatedAt            time.Time          `json:"created_at"`
-	UpdatedAt            time.Time          `json:"updated_at"`
-	DeletedAt            gorm.DeletedAt     `gorm:"index" json:"-"`
-	Name                 string             `gorm:"size:100;not null" json:"name"`                          // 任务名称
-	SourceDB             string             `gorm:"size:50;not null" json:"source_db"`                      // 源数据库连接名
-	SourceTable          string             `gorm:"size:100;not null" json:"source_table"`                  // 源表名
-	TargetDB             string             `gorm:"size:50;not null" json:"target_db"`                      // 目标数据库连接名
-	TargetTable          string             `gorm:"size:100;not null" json:"target_table"`                  // 目标表名
-	FieldMapping         FieldMapping       `gorm:"type:json" json:"field_mapping"`                         // 字段映射 {"source_field": "target_field"}
-	SyncType             string             `gorm:"size:20;not null" json:"sync_type"`                      // full, cdc, full_cdc
-	IncrementalKey       string             `gorm:"size:100" json:"incremental_key"`                        // 增量同步的关键字段（如 updated_at, id）
-	CronExpression       string             `gorm:"size:100" json:"cron_expression"`                        // Cron 表达式
-	ScheduleType         string             `gorm:"size:20;not null;default:interval" json:"schedule_type"` // interval, cron, manual
-	IntervalMinutes      int                `gorm:"not null;default:5" json:"interval_minutes"`
-	Status               int                `gorm:"default:1" json:"status"`           // 1: 启用, 0: 禁用
-	LastRunAt            *time.Time         `json:"last_run_at"`                       // 最后执行时间
-	LastRunStatus        string             `gorm:"size:20" json:"last_run_status"`    // success, failed, running
-	LastRunMessage       string             `gorm:"type:text" json:"last_run_message"` // 最后执行消息
-	LastSuccessAt        *time.Time         `json:"last_success_at"`
-	UserID               uint               `gorm:"not null" json:"user_id"`                 // 创建者
-	AlertChannelID    *uint         `gorm:"index" json:"alert_channel_id,omitempty"` // 预警发送方
-	AlertChannel      *AlertChannel `gorm:"foreignKey:AlertChannelID" json:"alert_channel,omitempty"`
-	AlertDelaySeconds int           `gorm:"not null;default:0" json:"alert_delay_seconds"` // 延迟预警阈值（秒）
-	ValidationStatus     string             `gorm:"size:20;not null;default:legacy" json:"validation_status"`
-	RuntimeStatus        string             `gorm:"size:30;not null;default:stopped;index" json:"runtime_status"`
-	RowsProcessed        int64              `gorm:"not null;default:0" json:"rows_processed"`
-	RowsPerSecond        float64            `gorm:"not null;default:0" json:"rows_per_second"`
-	DelaySeconds         int64              `gorm:"not null;default:0" json:"delay_seconds"`
-	PhaseStartedAt       *time.Time         `json:"phase_started_at"`
-	TaskTables           []SyncTaskTable    `gorm:"foreignKey:TaskID" json:"task_tables,omitempty"`
-	CDCCheckpoint        *SyncCDCCheckpoint `gorm:"foreignKey:TaskID;references:ID" json:"cdc_checkpoint,omitempty"`
+	ID                uint               `gorm:"primarykey" json:"id"`
+	CreatedAt         time.Time          `json:"created_at"`
+	UpdatedAt         time.Time          `json:"updated_at"`
+	DeletedAt         gorm.DeletedAt     `gorm:"index" json:"-"`
+	Name              string             `gorm:"size:100;not null" json:"name"`                          // 任务名称
+	SourceDB          string             `gorm:"size:50;not null" json:"source_db"`                      // 源数据库连接名
+	SourceTable       string             `gorm:"size:100;not null" json:"source_table"`                  // 源表名
+	TargetDB          string             `gorm:"size:50;not null" json:"target_db"`                      // 目标数据库连接名
+	TargetTable       string             `gorm:"size:100;not null" json:"target_table"`                  // 目标表名
+	FieldMapping      FieldMapping       `gorm:"type:json" json:"field_mapping"`                         // 字段映射 {"source_field": "target_field"}
+	SyncType          string             `gorm:"size:20;not null" json:"sync_type"`                      // full, cdc, full_cdc
+	IncrementalKey    string             `gorm:"size:100" json:"incremental_key"`                        // 增量同步的关键字段（如 updated_at, id）
+	CronExpression    string             `gorm:"size:100" json:"cron_expression"`                        // Cron 表达式
+	ScheduleType      string             `gorm:"size:20;not null;default:interval" json:"schedule_type"` // interval, cron, manual
+	IntervalMinutes   int                `gorm:"not null;default:5" json:"interval_minutes"`
+	Status            int                `gorm:"default:1" json:"status"`           // 1: 启用, 0: 禁用
+	LastRunAt         *time.Time         `json:"last_run_at"`                       // 最后执行时间
+	LastRunStatus     string             `gorm:"size:20" json:"last_run_status"`    // success, failed, running
+	LastRunMessage    string             `gorm:"type:text" json:"last_run_message"` // 最后执行消息
+	LastSuccessAt     *time.Time         `json:"last_success_at"`
+	UserID            uint               `gorm:"not null" json:"user_id"`                 // 创建者
+	AlertChannelID    *uint              `gorm:"index" json:"alert_channel_id,omitempty"` // 预警发送方
+	AlertChannel      *AlertChannel      `gorm:"foreignKey:AlertChannelID" json:"alert_channel,omitempty"`
+	AlertDelaySeconds int                `gorm:"not null;default:0" json:"alert_delay_seconds"` // 延迟预警阈值（秒）
+	ValidationStatus  string             `gorm:"size:20;not null;default:legacy" json:"validation_status"`
+	RuntimeStatus     string             `gorm:"size:30;not null;default:stopped;index" json:"runtime_status"`
+	RowsProcessed     int64              `gorm:"not null;default:0" json:"rows_processed"`
+	RowsPerSecond     float64            `gorm:"not null;default:0" json:"rows_per_second"`
+	DelaySeconds      int64              `gorm:"not null;default:0" json:"delay_seconds"`
+	PhaseStartedAt    *time.Time         `json:"phase_started_at"`
+	TaskTables        []SyncTaskTable    `gorm:"foreignKey:TaskID" json:"task_tables,omitempty"`
+	CDCCheckpoint     *SyncCDCCheckpoint `gorm:"foreignKey:TaskID;references:ID" json:"cdc_checkpoint,omitempty"`
 }
 
 // TableName 指定表名
@@ -68,17 +68,25 @@ func (SyncTask) TableName() string {
 
 // SyncTaskTable stores one source-to-target table mapping in a task.
 type SyncTaskTable struct {
-	ID               uint         `gorm:"primarykey" json:"id"`
-	CreatedAt        time.Time    `json:"created_at"`
-	UpdatedAt        time.Time    `json:"updated_at"`
-	TaskID           uint         `gorm:"not null;index;uniqueIndex:uk_task_source_table" json:"task_id"`
-	SourceTable      string       `gorm:"size:100;not null;uniqueIndex:uk_task_source_table" json:"source_table"`
-	TargetTable      string       `gorm:"size:100;not null" json:"target_table"`
-	IncrementalKey   string       `gorm:"size:100" json:"incremental_key"`
-	FieldMapping     FieldMapping `gorm:"type:json" json:"field_mapping"`
-	Position         int          `gorm:"not null;default:0" json:"position"`
-	SourcePrimaryKey string       `gorm:"size:100" json:"source_primary_key"`
-	TargetPrimaryKey string       `gorm:"size:100" json:"target_primary_key"`
+	ID                 uint         `gorm:"primarykey" json:"id"`
+	CreatedAt          time.Time    `json:"created_at"`
+	UpdatedAt          time.Time    `json:"updated_at"`
+	TaskID             uint         `gorm:"not null;index;uniqueIndex:uk_task_source_table" json:"task_id"`
+	SourceTable        string       `gorm:"size:100;not null;uniqueIndex:uk_task_source_table" json:"source_table"`
+	TargetTable        string       `gorm:"size:100;not null" json:"target_table"`
+	IncrementalKey     string       `gorm:"size:100" json:"incremental_key"`
+	FieldMapping       FieldMapping `gorm:"type:json" json:"field_mapping"`
+	Position           int          `gorm:"not null;default:0" json:"position"`
+	SourcePrimaryKey   string       `gorm:"size:100" json:"source_primary_key"`
+	TargetPrimaryKey   string       `gorm:"size:100" json:"target_primary_key"`
+	SyncState          string       `gorm:"size:30;not null;default:pending;index" json:"sync_state"`
+	SnapshotTotal      int64        `gorm:"not null;default:0" json:"snapshot_total"`
+	SnapshotProcessed  int64        `gorm:"not null;default:0" json:"snapshot_processed"`
+	ProgressPercent    float64      `gorm:"not null;default:0" json:"progress_percent"`
+	OnboardingFile     string       `gorm:"size:255" json:"onboarding_file"`
+	OnboardingPosition uint32       `gorm:"not null;default:0" json:"onboarding_position"`
+	ProgressMessage    string       `gorm:"type:text" json:"progress_message"`
+	ActivatedAt        *time.Time   `json:"activated_at"`
 }
 
 func (SyncTaskTable) TableName() string { return "sync_task_tables" }

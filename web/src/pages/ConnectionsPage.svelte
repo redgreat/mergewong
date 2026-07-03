@@ -1,5 +1,5 @@
 <script>
-  import { Database, RefreshCw } from "lucide-svelte";
+  import { Database, RefreshCw, EllipsisVertical } from "lucide-svelte";
   export let connections = [];
   export let tasks = [];
   export let connectionPage = 1;
@@ -17,13 +17,16 @@
   function isUsedByTask(conn) {
     return tasks.some(t => t.source_db === conn.name || t.target_db === conn.name);
   }
+
+  let menuConnId = null;
+  function handleOutside(event) { if (!event.target.closest(".task-operation")) menuConnId = null; }
 </script>
+
+<svelte:window on:click={handleOutside} />
 
 <section class="workspace-panel">
   <div class="card-header">
-    <div>
-      <h2>数据库连接</h2>
-    </div>
+    <div></div>
     <div class="header-actions">
       <span class="record-count">共 {connectionTotal} 个连接</span>
       <button class="ghost icon-text" on:click={onRefresh}><RefreshCw size={15} />刷新</button>
@@ -44,7 +47,6 @@
     </thead>
     <tbody>
       {#each connections as connection}
-        {@const inUse = isUsedByTask(connection)}
         <tr>
           <td>{connection.name}</td>
           <td>{connection.type}</td>
@@ -52,10 +54,20 @@
           <td>{connection.host}:{connection.port}</td>
           <td>{connection.database}</td>
           <td>{connection.username}</td>
-          {#if canManage}<td class="row-actions">
-            <button class="ghost" disabled={inUse} title={inUse ? "该连接正被同步任务使用，不可编辑" : ""} on:click={() => !inUse && onEdit(connection)}>编辑</button>
-            <button class="ghost" on:click={() => onTest(connection)}>测试</button>
-            <button class="danger" disabled={inUse} title={inUse ? "该连接正被同步任务使用，不可删除" : ""} on:click={() => !inUse && onDelete(connection)}>删除</button>
+          {#if canManage}<td>
+            <div class="task-operation">
+              <button class="icon-button" aria-label={`操作 ${connection.name}`} on:click|stopPropagation={() => (menuConnId = menuConnId === connection.id ? null : connection.id)}>
+                <EllipsisVertical size={17} />
+              </button>
+              {#if menuConnId === connection.id}
+                {@const inUse = isUsedByTask(connection)}
+                <div class="operation-menu">
+                  <button disabled={inUse} title={inUse ? "该连接正被同步任务使用，不可编辑" : ""} on:click={() => { menuConnId = null; !inUse && onEdit(connection); }}>编辑</button>
+                  <button on:click={() => { menuConnId = null; onTest(connection); }}>测试</button>
+                  <button class="danger-text" disabled={inUse} title={inUse ? "该连接正被同步任务使用，不可删除" : ""} on:click={() => { menuConnId = null; !inUse && onDelete(connection); }}>删除</button>
+                </div>
+              {/if}
+            </div>
           </td>{/if}
         </tr>
       {/each}

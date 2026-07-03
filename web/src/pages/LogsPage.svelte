@@ -32,9 +32,7 @@
 
 <section class="workspace-panel">
   <div class="card-header">
-    <div>
-      <h2>同步日志</h2>
-    </div>
+    <div></div>
     <div class="header-actions"><button class="ghost icon-text" on:click={onRefresh}><RefreshCw size={15} />刷新</button></div>
   </div>
   <div class="toolbar">

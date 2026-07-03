@@ -52,3 +52,11 @@ fmt: ## 格式化代码
 migrate: ## 运行数据库迁移
 	@echo "运行数据库迁移..."
 	go run ./cmd/server/main.go
+
+release: ## 发布版本
+	@echo "准备发布..."
+ifeq ($(OS),Windows_NT)
+	powershell -ExecutionPolicy Bypass -File script\release.ps1
+else
+	bash script/release.sh
+endif

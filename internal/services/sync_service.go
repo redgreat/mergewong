@@ -143,17 +143,8 @@ func validateTaskAlertSettings(task *models.SyncTask) error {
 	if task.ScheduleType != "manual" {
 		return fmt.Errorf("全量初始化和 Binlog CDC 不需要 Cron 或轮询调度")
 	}
-	if task.AlertDelayMinutes < 0 || task.AlertStoppedMinutes < 0 {
+	if task.AlertDelaySeconds < 0 {
 		return fmt.Errorf("预警时间不能小于 0")
-	}
-	if task.ScheduleType == "interval" && task.AlertStoppedMinutes > 0 && task.AlertStoppedMinutes <= task.IntervalMinutes {
-		return fmt.Errorf("停止阈值必须大于任务执行间隔")
-	}
-	if task.AlertChannelID != nil && task.AlertDelayMinutes == 0 && task.AlertStoppedMinutes == 0 && !task.AlertOnError {
-		return fmt.Errorf("选择预警发送方后至少启用一种预警")
-	}
-	if task.AlertCooldownMinutes <= 0 {
-		task.AlertCooldownMinutes = 30
 	}
 	return nil
 }

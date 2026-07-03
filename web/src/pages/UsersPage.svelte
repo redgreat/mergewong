@@ -16,7 +16,7 @@
 
 <section class="workspace-panel">
   <div class="card-header">
-    <div><h2>用户管理</h2></div>
+    <div></div>
     <div class="header-actions">
       <span class="record-count">共 {userTotal} 个用户</span>
       <button class="ghost icon-text" on:click={onRefresh}><RefreshCw size={15} />刷新</button>
