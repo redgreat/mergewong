@@ -20,9 +20,8 @@
   <div class="login-card">
     <div class="login-brand">
       <span class="login-logo"><img src="/favicon.png" alt="logo" width="28" height="28" style="border-radius:7px;display:block;" /></span>
-      <span class="login-title">MergeWong</span>
+      <span class="login-title">数据同步管理平台</span>
     </div>
-    <p class="login-subtitle">数据同步管理平台</p>
 
     <form on:submit={handleSubmit}>
       <label class="login-field">
@@ -38,7 +37,7 @@
       </button>
     </form>
 
-    <p class="login-footer">© 2026 MergeWong</p>
+    <p class="login-footer">© {new Date().getFullYear()} wangcw</p>
   </div>
 </div>
 
@@ -126,13 +125,6 @@
     font-weight: 720;
     letter-spacing: -.02em;
     color: var(--text);
-  }
-
-  .login-subtitle {
-    margin: 8px 0 28px;
-    text-align: center;
-    color: var(--text-muted);
-    font-size: 13px;
   }
 
   .login-field {

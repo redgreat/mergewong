@@ -3,6 +3,11 @@ const baseUrl = import.meta.env.VITE_API_BASE || "";
 export async function request(path, options = {}) {
   const { method = "GET", body, token, params } = options;
   let url = `${baseUrl}${path}`;
+  const origin = globalThis.location?.origin;
+
+  if (origin) {
+    url = new URL(url, origin).toString();
+  }
 
   if (params) {
     const search = new URLSearchParams();

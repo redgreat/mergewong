@@ -19,11 +19,6 @@ if (git tag --list $Version) { throw "标签 $Version 已存在" }
 
 go test ./...
 if ($LASTEXITCODE) { throw 'Go 测试失败' }
-Push-Location web
-try {
-  npm ci; if ($LASTEXITCODE) { throw 'npm ci 失败' }
-  npm run build; if ($LASTEXITCODE) { throw '前端构建失败' }
-} finally { Pop-Location }
 
 git tag -a $Version -m "Release $Version"
 if ($LASTEXITCODE) { throw '创建标签失败' }

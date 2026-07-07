@@ -49,7 +49,7 @@
       {/if}
     </nav>
     <div class="sidebar-footer">
-      <span class="sidebar-copyright">© 2026 数据同步</span>
+      <span class="sidebar-copyright">© {new Date().getFullYear()} wangcw</span>
     </div>
   {/if}
 </aside>
