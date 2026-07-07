@@ -53,7 +53,7 @@ func (c *Connector) Connect(cfg config.DatabaseConfig) (*gorm.DB, error) {
 
 	// GORM 配置
 	db, err := gorm.Open(dialector, &gorm.Config{
-		Logger: logger.Default.LogMode(logger.Info),
+		Logger: logger.Default.LogMode(logger.Warn),
 		NowFunc: func() time.Time {
 			return time.Now().Local()
 		},

@@ -23,7 +23,7 @@
       <span class="login-title">数据同步管理平台</span>
     </div>
 
-    <form on:submit={handleSubmit}>
+    <form class="login-form" on:submit={handleSubmit}>
       <label class="login-field">
         <span>用户名</span>
         <input type="text" bind:value={loginForm.username} placeholder="请输入用户名" autocomplete="username" />
@@ -92,7 +92,7 @@
     position: relative;
     z-index: 1;
     width: min(400px, calc(100vw - 48px));
-    padding: 40px 36px 28px;
+    padding: 42px 36px 30px;
     background: var(--surface);
     border: 1px solid var(--border);
     border-radius: 18px;
@@ -127,11 +127,18 @@
     color: var(--text);
   }
 
+  .login-form {
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+    margin-top: 30px;
+    padding-top: 2px;
+  }
+
   .login-field {
     display: flex;
     flex-direction: column;
     gap: 7px;
-    margin-bottom: 18px;
   }
 
   .login-field span {
@@ -142,16 +149,26 @@
 
   .login-field input {
     min-height: 44px;
+    padding-inline: 14px;
     border-radius: 10px;
+    background: color-mix(in srgb, var(--surface-2) 70%, transparent);
+    transition: border-color .16s ease, box-shadow .16s ease, background .16s ease;
+  }
+
+  .login-field input:focus {
+    background: var(--surface);
+    border-color: color-mix(in srgb, var(--primary) 70%, var(--border));
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary) 18%, transparent);
   }
 
   .login-btn {
     width: 100%;
     min-height: 44px;
-    margin-top: 6px;
+    margin-top: 8px;
     border-radius: 10px;
     font-size: 15px;
     letter-spacing: .04em;
+    box-shadow: 0 10px 24px color-mix(in srgb, var(--primary) 28%, transparent);
   }
 
   .login-footer {
