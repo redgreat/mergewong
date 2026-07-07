@@ -2,14 +2,17 @@ const baseUrl = import.meta.env.VITE_API_BASE || "";
 
 export async function request(path, options = {}) {
   const { method = "GET", body, token, params } = options;
-  const url = new URL(`${baseUrl}${path}`);
+  let url = `${baseUrl}${path}`;
 
   if (params) {
+    const search = new URLSearchParams();
     Object.entries(params).forEach(([key, value]) => {
       if (value !== undefined && value !== null && value !== "") {
-        url.searchParams.set(key, String(value));
+        search.set(key, String(value));
       }
     });
+    const qs = search.toString();
+    if (qs) url += `?${qs}`;
   }
 
   const headers = {
