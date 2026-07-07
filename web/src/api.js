@@ -1,4 +1,4 @@
-const baseUrl = import.meta.env.VITE_API_BASE || "http://localhost:8080";
+const baseUrl = import.meta.env.VITE_API_BASE || "";
 
 export async function request(path, options = {}) {
   const { method = "GET", body, token, params } = options;

@@ -1,0 +1,27 @@
+{
+    email rubygreat@msn.com
+}
+
+otter.lunz.cn {
+    tls /etc/caddy/certs/lunz.cn.pem /etc/caddy/certs/lunz.cn.key
+
+    header {
+        Strict-Transport-Security "max-age=31536000; includeSubDomains"
+        X-Content-Type-Options "nosniff"
+        Referrer-Policy "strict-origin-when-cross-origin"
+    }
+    handle {
+        encode zstd gzip
+
+        reverse_proxy 192.168.11.244:8090 {
+            transport http {
+                versions 1.1
+            }
+
+            header_up X-Real-IP {remote_host}
+            header_up X-Forwarded-For {remote_host}
+            header_up X-Forwarded-Proto {scheme}
+            header_up X-Forwarded-Host {host}
+        }
+    }
+}
