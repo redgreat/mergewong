@@ -3,6 +3,7 @@ package handlers
 import (
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/redgreat/mergewong/internal/models"
@@ -361,4 +362,82 @@ func (h *SyncHandler) ListLogs(c *gin.Context) {
 		return
 	}
 	utils.Success(c, gin.H{"data": logs, "total": total, "page": page, "page_size": pageSize})
+}
+
+type RepairCompareRequest struct {
+	CutoffTime   string `json:"cutoff_time"`
+	CutoffColumn string `json:"cutoff_column"`
+}
+
+func (h *SyncHandler) ListRepairJobs(c *gin.Context) {
+	id, _ := strconv.ParseUint(c.Param("id"), 10, 32)
+	jobs, err := services.NewRepairService().ListJobs(uint(id))
+	if err != nil {
+		utils.InternalServerError(c, "获取数据修复任务失败: "+err.Error())
+		return
+	}
+	utils.Success(c, jobs)
+}
+
+func (h *SyncHandler) StartRepairCompare(c *gin.Context) {
+	id, _ := strconv.ParseUint(c.Param("id"), 10, 32)
+	var req RepairCompareRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		utils.BadRequest(c, "请求参数错误: "+err.Error())
+		return
+	}
+	compareReq := services.RepairCompareRequest{CutoffColumn: strings.TrimSpace(req.CutoffColumn)}
+	if strings.TrimSpace(req.CutoffTime) != "" {
+		cutoff, err := parseRepairTime(req.CutoffTime)
+		if err != nil {
+			utils.BadRequest(c, "截止时间格式错误")
+			return
+		}
+		compareReq.CutoffTime = &cutoff
+	}
+	job, err := services.NewRepairService().StartCompare(uint(id), compareReq)
+	if err != nil {
+		utils.BadRequest(c, err.Error())
+		return
+	}
+	utils.SuccessWithMessage(c, "全量对比已开始", job)
+}
+
+func (h *SyncHandler) StartRepairApply(c *gin.Context) {
+	id, _ := strconv.ParseUint(c.Param("id"), 10, 32)
+	jobID, _ := strconv.ParseUint(c.Param("job_id"), 10, 32)
+	job, err := services.NewRepairService().StartRepair(uint(id), uint(jobID))
+	if err != nil {
+		utils.BadRequest(c, err.Error())
+		return
+	}
+	utils.SuccessWithMessage(c, "补数已开始", job)
+}
+
+func (h *SyncHandler) CancelRepairJob(c *gin.Context) {
+	jobID, _ := strconv.ParseUint(c.Param("job_id"), 10, 32)
+	if err := services.NewRepairService().CancelJob(uint(jobID)); err != nil {
+		utils.BadRequest(c, err.Error())
+		return
+	}
+	utils.SuccessWithMessage(c, "已取消", nil)
+}
+
+func (h *SyncHandler) ListRepairDiffs(c *gin.Context) {
+	jobID, _ := strconv.ParseUint(c.Param("job_id"), 10, 32)
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "20"))
+	diffs, total, err := services.NewRepairService().ListDiffs(uint(jobID), page, pageSize)
+	if err != nil {
+		utils.InternalServerError(c, "获取差异失败: "+err.Error())
+		return
+	}
+	utils.Success(c, gin.H{"data": diffs, "total": total, "page": page, "page_size": pageSize})
+}
+
+func parseRepairTime(value string) (time.Time, error) {
+	if parsed, err := time.Parse(time.RFC3339, value); err == nil {
+		return parsed, nil
+	}
+	return time.ParseInLocation("2006-01-02 15:04:05", value, time.Local)
 }

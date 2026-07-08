@@ -278,6 +278,13 @@ input:focus, select:focus, textarea:focus { border-color: var(--primary); box-sh
 .detail-info-grid > div { display: flex; flex-direction: column; gap: 8px; padding: 18px 22px; background: var(--surface); }
 .detail-info-grid span { color: var(--text-muted); font-size: 12px; }
 .detail-info-grid strong { font-size: 14px; }
+.repair-toolbar { display: grid; grid-template-columns: repeat(2, minmax(180px, 260px)); gap: 14px; padding: 0 24px 18px; }
+.repair-toolbar label { display: flex; flex-direction: column; gap: 7px; color: var(--text-secondary); font-size: 12px; font-weight: 550; }
+.inline-error { margin: 0 24px 14px; padding: 10px 12px; border: 1px solid color-mix(in srgb, var(--danger) 35%, transparent); border-radius: 8px; color: var(--danger); background: color-mix(in srgb, var(--danger) 8%, transparent); font-size: 13px; }
+.server-metric-grid { padding: 0 24px 20px; }
+.monitor-section { border-top: 1px solid var(--border-soft); }
+.card-header.compact { padding-top: 18px; padding-bottom: 14px; }
+.monitor-form { padding: 0 24px 22px; margin-top: 0; }
 @media (max-width: 1100px) { .metric-grid, .detail-info-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 
 .empty-row td { height: 280px; padding: 0; }

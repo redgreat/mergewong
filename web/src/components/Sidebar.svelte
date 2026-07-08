@@ -1,5 +1,5 @@
 <script>
-  import { BellRing, Database, PanelLeftClose, PanelLeftOpen, ScrollText, UserRoundCog, Workflow } from "lucide-svelte";
+  import { BellRing, Database, MonitorCog, PanelLeftClose, PanelLeftOpen, ScrollText, UserRoundCog, Workflow } from "lucide-svelte";
 
   export let token = "";
   export let view = "login";
@@ -40,6 +40,10 @@
       <button aria-label="预警管理" title="预警管理" class:active={view === "alerts"} on:click={() => navigate("alerts")}>
         <span class="menu-icon"><BellRing size={18} /></span>
         <span class="menu-text">预警管理</span>
+      </button>
+      <button aria-label="服务器监控" title="服务器监控" class:active={view === "server_monitor"} on:click={() => navigate("server_monitor")}>
+        <span class="menu-icon"><MonitorCog size={18} /></span>
+        <span class="menu-text">服务器监控</span>
       </button>
       {#if role === "admin"}
         <button aria-label="用户管理" title="用户管理" class:active={view === "users"} on:click={() => navigate("users")}>

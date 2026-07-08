@@ -86,6 +86,7 @@ func main() {
 	syncHandler := handlers.NewSyncHandler()
 	connectionHandler := handlers.NewConnectionHandler()
 	alertHandler := handlers.NewAlertHandler()
+	serverMonitorHandler := handlers.NewServerMonitorHandler()
 
 	api := router.Group("/api")
 	authGroup := api.Group("/auth")
@@ -121,6 +122,8 @@ func main() {
 	syncGroup.GET("/tasks", syncHandler.ListTasks)
 	syncGroup.GET("/tasks/:id", syncHandler.GetTask)
 	syncGroup.GET("/tasks/:id/logs", syncHandler.GetTaskLogs)
+	syncGroup.GET("/tasks/:id/repair/jobs", syncHandler.ListRepairJobs)
+	syncGroup.GET("/repair/jobs/:job_id/diffs", syncHandler.ListRepairDiffs)
 	syncGroup.GET("/logs", syncHandler.ListLogs)
 	syncAdmin := syncGroup.Group("", middleware.AdminMiddleware())
 	syncAdmin.POST("/tasks", syncHandler.CreateTask)
@@ -131,6 +134,9 @@ func main() {
 	syncAdmin.POST("/tasks/:id/pause", syncHandler.PauseTask)
 	syncAdmin.POST("/tasks/:id/resume", syncHandler.ResumeTask)
 	syncAdmin.PUT("/tasks/:id/checkpoint", syncHandler.UpdateCheckpoint)
+	syncAdmin.POST("/tasks/:id/repair/compare", syncHandler.StartRepairCompare)
+	syncAdmin.POST("/tasks/:id/repair/jobs/:job_id/apply", syncHandler.StartRepairApply)
+	syncAdmin.POST("/repair/jobs/:job_id/cancel", syncHandler.CancelRepairJob)
 
 	alertGroup := api.Group("/alerts", middleware.AuthMiddleware())
 	alertGroup.GET("/channels", alertHandler.List)
@@ -139,6 +145,11 @@ func main() {
 	alertAdmin.PUT("/channels/:id", alertHandler.Update)
 	alertAdmin.DELETE("/channels/:id", alertHandler.Delete)
 	alertAdmin.POST("/channels/:id/test", alertHandler.Test)
+
+	serverGroup := api.Group("/server", middleware.AuthMiddleware())
+	serverGroup.GET("/metrics", serverMonitorHandler.Metrics)
+	serverGroup.GET("/monitor-setting", serverMonitorHandler.GetSetting)
+	serverGroup.PUT("/monitor-setting", middleware.AdminMiddleware(), serverMonitorHandler.SaveSetting)
 
 	staticPath := filepath.Join("web", "dist")
 	if _, err := os.Stat(staticPath); err == nil {

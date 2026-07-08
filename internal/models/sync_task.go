@@ -86,6 +86,7 @@ type SyncTask struct {
 	RowsPerSecond        float64            `gorm:"not null;default:0" json:"rows_per_second"`
 	DelaySeconds         int64              `gorm:"not null;default:0" json:"delay_seconds"`
 	PhaseStartedAt       *time.Time         `json:"phase_started_at"`
+	RepairStatus         string             `gorm:"size:30;not null;default:idle;index" json:"repair_status"`
 	TaskTables           []SyncTaskTable    `gorm:"foreignKey:TaskID" json:"task_tables,omitempty"`
 	CDCCheckpoint        *SyncCDCCheckpoint `gorm:"foreignKey:TaskID;references:ID" json:"cdc_checkpoint,omitempty"`
 }
@@ -133,6 +134,20 @@ type SyncCheckpoint struct {
 
 func (SyncCheckpoint) TableName() string { return "sync_checkpoints" }
 
+type SyncSnapshotShardCheckpoint struct {
+	ID               uint      `gorm:"primarykey" json:"id"`
+	TaskTableID      uint      `gorm:"not null;uniqueIndex:uk_snapshot_shard" json:"task_table_id"`
+	ShardIndex       int       `gorm:"not null;uniqueIndex:uk_snapshot_shard" json:"shard_index"`
+	LowerBound       string    `gorm:"type:text" json:"lower_bound"`
+	UpperBound       string    `gorm:"type:text" json:"upper_bound"`
+	CursorPrimaryKey string    `gorm:"type:text" json:"cursor_primary_key"`
+	ProcessedRows    int64     `gorm:"not null;default:0" json:"processed_rows"`
+	Completed        bool      `gorm:"not null;default:false" json:"completed"`
+	UpdatedAt        time.Time `json:"updated_at"`
+}
+
+func (SyncSnapshotShardCheckpoint) TableName() string { return "sync_snapshot_shard_checkpoints" }
+
 // SyncCDCCheckpoint is the durable resume point for a task's MySQL binlog stream.
 // The position is advanced only after the corresponding target transaction commits.
 type SyncCDCCheckpoint struct {
@@ -146,6 +161,19 @@ type SyncCDCCheckpoint struct {
 }
 
 func (SyncCDCCheckpoint) TableName() string { return "sync_cdc_checkpoints" }
+
+type SyncXAPreparedTransaction struct {
+	ID             uint      `gorm:"primarykey" json:"id"`
+	CreatedAt      time.Time `json:"created_at"`
+	UpdatedAt      time.Time `json:"updated_at"`
+	TaskID         uint      `gorm:"not null;uniqueIndex:uk_task_xa" json:"task_id"`
+	XIDKey         string    `gorm:"size:255;not null;uniqueIndex:uk_task_xa" json:"xid_key"`
+	BinlogFile     string    `gorm:"size:255;not null" json:"binlog_file"`
+	BinlogPosition uint32    `gorm:"not null" json:"binlog_position"`
+	OperationsJSON string    `gorm:"type:text;not null" json:"operations_json"`
+}
+
+func (SyncXAPreparedTransaction) TableName() string { return "sync_xa_prepared_transactions" }
 
 // SyncLog 同步日志
 type SyncLog struct {
@@ -181,3 +209,63 @@ type TaskAlertState struct {
 }
 
 func (TaskAlertState) TableName() string { return "task_alert_states" }
+
+type ServerMonitorSetting struct {
+	ID                 uint          `gorm:"primarykey" json:"id"`
+	CreatedAt          time.Time     `json:"created_at"`
+	UpdatedAt          time.Time     `json:"updated_at"`
+	Enabled            bool          `gorm:"not null;default:true" json:"enabled"`
+	AlertChannelID     *uint         `gorm:"index" json:"alert_channel_id,omitempty"`
+	AlertChannel       *AlertChannel `gorm:"foreignKey:AlertChannelID" json:"alert_channel,omitempty"`
+	CPUThreshold       float64       `gorm:"not null;default:85" json:"cpu_threshold"`
+	MemoryThreshold    float64       `gorm:"not null;default:85" json:"memory_threshold"`
+	DiskThreshold      float64       `gorm:"not null;default:90" json:"disk_threshold"`
+	GoroutineThreshold int           `gorm:"not null;default:20000" json:"goroutine_threshold"`
+	LastAlertAt        *time.Time    `json:"last_alert_at"`
+}
+
+func (ServerMonitorSetting) TableName() string { return "server_monitor_settings" }
+
+type SyncRepairJob struct {
+	ID              uint       `gorm:"primarykey" json:"id"`
+	CreatedAt       time.Time  `json:"created_at"`
+	UpdatedAt       time.Time  `json:"updated_at"`
+	TaskID          uint       `gorm:"not null;index" json:"task_id"`
+	JobType         string     `gorm:"size:20;not null;index" json:"job_type"` // compare, repair
+	Status          string     `gorm:"size:20;not null;index" json:"status"`   // running, canceling, canceled, success, failed
+	SourceJobID     uint       `gorm:"index" json:"source_job_id"`
+	CutoffTime      *time.Time `json:"cutoff_time"`
+	CutoffColumn    string     `gorm:"size:100" json:"cutoff_column"`
+	TotalRows       int64      `gorm:"not null;default:0" json:"total_rows"`
+	ProcessedRows   int64      `gorm:"not null;default:0" json:"processed_rows"`
+	DiffRows        int64      `gorm:"not null;default:0" json:"diff_rows"`
+	RepairedRows    int64      `gorm:"not null;default:0" json:"repaired_rows"`
+	ProgressPercent float64    `gorm:"not null;default:0" json:"progress_percent"`
+	Message         string     `gorm:"type:text" json:"message"`
+	ErrorDetail     string     `gorm:"type:text" json:"error_detail,omitempty"`
+	PreviousStatus  string     `gorm:"size:30" json:"previous_status"`
+	StartedAt       *time.Time `json:"started_at"`
+	FinishedAt      *time.Time `json:"finished_at"`
+}
+
+func (SyncRepairJob) TableName() string { return "sync_repair_jobs" }
+
+type SyncRepairDiff struct {
+	ID          uint      `gorm:"primarykey" json:"id"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
+	JobID       uint      `gorm:"not null;index;uniqueIndex:uk_repair_diff" json:"job_id"`
+	TaskID      uint      `gorm:"not null;index" json:"task_id"`
+	TaskTableID uint      `gorm:"not null;index;uniqueIndex:uk_repair_diff" json:"task_table_id"`
+	SourceTable string    `gorm:"size:100;not null" json:"source_table"`
+	TargetTable string    `gorm:"size:100;not null" json:"target_table"`
+	SourcePK    string    `gorm:"size:255;not null;uniqueIndex:uk_repair_diff" json:"source_pk"`
+	TargetPK    string    `gorm:"size:255" json:"target_pk"`
+	DiffType    string    `gorm:"size:30;not null;index" json:"diff_type"` // missing_target, missing_source, mismatch
+	SourceHash  string    `gorm:"size:64" json:"source_hash"`
+	TargetHash  string    `gorm:"size:64" json:"target_hash"`
+	Status      string    `gorm:"size:20;not null;default:pending;index" json:"status"` // pending, repaired, skipped, failed
+	Message     string    `gorm:"type:text" json:"message"`
+}
+
+func (SyncRepairDiff) TableName() string { return "sync_repair_diffs" }

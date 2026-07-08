@@ -5,13 +5,18 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"github.com/redgreat/mergewong/internal/database"
 	"github.com/redgreat/mergewong/internal/models"
 	"gorm.io/gorm"
 )
 
-const defaultSyncBatchSize = 500
+const (
+	defaultSyncBatchSize       = 5000
+	defaultSnapshotTableWorker = 4
+	defaultSnapshotShardWorker = 4
+)
 
 var taskRunLocks sync.Map
 var ErrTaskPaused = errors.New("任务已暂停")
@@ -36,13 +41,34 @@ func (s *SyncService) syncValidatedTask(task *models.SyncTask) (int64, error) {
 		return 0, err
 	}
 	var total int64
+	var totalMu sync.Mutex
+	sem := make(chan struct{}, defaultSnapshotTableWorker)
+	errCh := make(chan error, len(task.TaskTables))
+	var wg sync.WaitGroup
 	for i := range task.TaskTables {
-		rows, err := s.syncValidatedTable(task, &task.TaskTables[i], sourceDB, targetDB)
+		mapping := &task.TaskTables[i]
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+			rows, err := s.syncValidatedTable(task, mapping, sourceDB, targetDB)
+			if err != nil {
+				_ = updateTaskTableProgress(s.systemDB, mapping.ID, map[string]interface{}{"sync_state": "failed", "progress_message": err.Error()})
+				errCh <- fmt.Errorf("表 %s 同步失败: %w", mapping.SourceTable, err)
+				return
+			}
+			totalMu.Lock()
+			total += rows
+			totalMu.Unlock()
+		}()
+	}
+	wg.Wait()
+	close(errCh)
+	for err := range errCh {
 		if err != nil {
-			_ = updateTaskTableProgress(s.systemDB, task.TaskTables[i].ID, map[string]interface{}{"sync_state": "failed", "progress_message": err.Error()})
-			return total, fmt.Errorf("表 %s 同步失败: %w", task.TaskTables[i].SourceTable, err)
+			return total, err
 		}
-		total += rows
 	}
 	return total, nil
 }
@@ -72,43 +98,86 @@ func (s *SyncService) syncValidatedTable(task *models.SyncTask, mapping *models.
 	if err := sourceDB.Table(mapping.SourceTable).Count(&sourceTotal).Error; err != nil {
 		return 0, err
 	}
-	processed := mapping.SnapshotProcessed
+	shards, err := s.ensureSnapshotShards(sourceDB, mapping, sourceTotal)
+	if err != nil {
+		return 0, err
+	}
+	processed := shardProcessedRows(shards)
 	_ = updateTaskTableProgress(s.systemDB, mapping.ID, map[string]interface{}{"sync_state": "initializing", "snapshot_total": sourceTotal, "progress_message": "正在全量初始化"})
-	var total int64
+	var total atomic.Int64
+	total.Store(processed)
+	sem := make(chan struct{}, defaultSnapshotShardWorker)
+	errCh := make(chan error, len(shards))
+	var wg sync.WaitGroup
+	for i := range shards {
+		shard := shards[i]
+		if shard.Completed {
+			continue
+		}
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+			if err := s.syncSnapshotShard(task, mapping, sourceDB, targetDB, &shard, sourceTotal, &total); err != nil {
+				errCh <- err
+			}
+		}()
+	}
+	wg.Wait()
+	close(errCh)
+	for err := range errCh {
+		if err != nil {
+			return total.Load() - processed, err
+		}
+	}
+	checkpoint.Completed = true
+	checkpoint.CursorPrimaryKey = ""
+	if err := saveCheckpoint(s.systemDB, &checkpoint); err != nil {
+		return total.Load() - processed, err
+	}
+	if err := updateTaskTableProgress(s.systemDB, mapping.ID, map[string]interface{}{"sync_state": "snapshot_completed", "snapshot_processed": sourceTotal, "progress_percent": 100, "progress_message": "全量初始化完成"}); err != nil {
+		return total.Load() - processed, err
+	}
+	if current, loadErr := s.GetTask(task.ID); loadErr == nil {
+		s.RecordTaskEvent(current, "table_snapshot_completed", "snapshot", "success", "表全量初始化完成", fmt.Sprintf("%s：%d 行", mapping.SourceTable, sourceTotal), sourceTotal, 0)
+	}
+	return total.Load() - processed, nil
+}
+
+func updateTaskTableProgress(db *gorm.DB, tableID uint, updates map[string]interface{}) error {
+	return db.Model(&models.SyncTaskTable{}).Where("id = ?", tableID).Updates(updates).Error
+}
+
+func (s *SyncService) syncSnapshotShard(task *models.SyncTask, mapping *models.SyncTaskTable, sourceDB, targetDB *gorm.DB, shard *models.SyncSnapshotShardCheckpoint, sourceTotal int64, total *atomic.Int64) error {
 	for {
 		var runtime struct{ RuntimeStatus string }
 		if err := s.systemDB.Model(&models.SyncTask{}).Select("runtime_status").Where("id = ?", task.ID).Scan(&runtime).Error; err != nil {
-			return total, err
+			return err
 		}
 		if runtime.RuntimeStatus == "paused" {
-			return total, ErrTaskPaused
+			return ErrTaskPaused
 		}
-		batch, columns, lastCursor, lastPK, err := readMySQLBatch(task, mapping, sourceDB, &checkpoint)
+		batch, columns, lastPK, err := readMySQLShardBatch(task, mapping, sourceDB, shard)
 		if err != nil {
-			return total, err
+			return err
 		}
 		if len(batch) == 0 {
-			checkpoint.Completed = true
-			if err := saveCheckpoint(s.systemDB, &checkpoint); err != nil {
-				return total, err
+			shard.Completed = true
+			if err := saveShardCheckpoint(s.systemDB, shard); err != nil {
+				return err
 			}
-			if err := updateTaskTableProgress(s.systemDB, mapping.ID, map[string]interface{}{"sync_state": "snapshot_completed", "snapshot_processed": sourceTotal, "progress_percent": 100, "progress_message": "全量初始化完成"}); err != nil {
-				return total, err
-			}
-			if current, loadErr := s.GetTask(task.ID); loadErr == nil {
-				s.RecordTaskEvent(current, "table_snapshot_completed", "snapshot", "success", "表全量初始化完成", fmt.Sprintf("%s：%d 行", mapping.SourceTable, sourceTotal), sourceTotal, 0)
-			}
-			return total, nil
+			return nil
 		}
 		if err := writeMySQLBatch(targetDB, mapping, columns, batch); err != nil {
-			return total, err
+			return err
 		}
-		checkpoint.CursorValue, checkpoint.CursorPrimaryKey = lastCursor, lastPK
-		if err := saveCheckpoint(s.systemDB, &checkpoint); err != nil {
-			return total, err
+		shard.CursorPrimaryKey = lastPK
+		shard.ProcessedRows += int64(len(batch))
+		if err := saveShardCheckpoint(s.systemDB, shard); err != nil {
+			return err
 		}
-		total += int64(len(batch))
-		processed += int64(len(batch))
+		processed := total.Add(int64(len(batch)))
 		percent := float64(100)
 		if sourceTotal > 0 {
 			percent = float64(processed) * 100 / float64(sourceTotal)
@@ -117,13 +186,73 @@ func (s *SyncService) syncValidatedTable(task *models.SyncTask, mapping *models.
 			}
 		}
 		if err := updateTaskTableProgress(s.systemDB, mapping.ID, map[string]interface{}{"sync_state": "initializing", "snapshot_processed": processed, "snapshot_total": sourceTotal, "progress_percent": percent, "progress_message": fmt.Sprintf("已初始化 %d / %d 行", processed, sourceTotal)}); err != nil {
-			return total, err
+			return err
 		}
 	}
 }
 
-func updateTaskTableProgress(db *gorm.DB, tableID uint, updates map[string]interface{}) error {
-	return db.Model(&models.SyncTaskTable{}).Where("id = ?", tableID).Updates(updates).Error
+func (s *SyncService) ensureSnapshotShards(db *gorm.DB, mapping *models.SyncTaskTable, sourceTotal int64) ([]models.SyncSnapshotShardCheckpoint, error) {
+	var shards []models.SyncSnapshotShardCheckpoint
+	if err := s.systemDB.Where("task_table_id = ?", mapping.ID).Order("shard_index ASC").Find(&shards).Error; err != nil {
+		return nil, err
+	}
+	if len(shards) > 0 {
+		return shards, nil
+	}
+	shardCount := defaultSnapshotShardWorker
+	if sourceTotal < int64(defaultSyncBatchSize*2) {
+		shardCount = 1
+	} else if sourceTotal < int64(shardCount) {
+		shardCount = int(sourceTotal)
+	}
+	if shardCount < 1 {
+		shardCount = 1
+	}
+	bounds, err := snapshotShardBounds(db, mapping.SourceTable, mapping.SourcePrimaryKey, sourceTotal, shardCount)
+	if err != nil {
+		return nil, err
+	}
+	shards = make([]models.SyncSnapshotShardCheckpoint, shardCount)
+	for i := 0; i < shardCount; i++ {
+		lower := ""
+		if i > 0 {
+			lower = bounds[i-1]
+		}
+		upper := ""
+		if i < len(bounds) {
+			upper = bounds[i]
+		}
+		shards[i] = models.SyncSnapshotShardCheckpoint{TaskTableID: mapping.ID, ShardIndex: i, LowerBound: lower, UpperBound: upper}
+	}
+	if err := s.systemDB.Create(&shards).Error; err != nil {
+		return nil, err
+	}
+	return shards, nil
+}
+
+func snapshotShardBounds(db *gorm.DB, table, pk string, sourceTotal int64, shardCount int) ([]string, error) {
+	bounds := []string{}
+	if shardCount <= 1 || sourceTotal <= 0 {
+		return bounds, nil
+	}
+	for i := 1; i < shardCount; i++ {
+		offset := sourceTotal * int64(i) / int64(shardCount)
+		var value interface{}
+		row := db.Raw("SELECT "+quoteMySQL(pk)+" FROM "+quoteMySQL(table)+" ORDER BY "+quoteMySQL(pk)+" LIMIT 1 OFFSET ?", offset).Row()
+		if err := row.Scan(&value); err != nil {
+			return nil, err
+		}
+		bounds = append(bounds, valueString(normalizeMySQLScannedValue(value)))
+	}
+	return bounds, nil
+}
+
+func shardProcessedRows(shards []models.SyncSnapshotShardCheckpoint) int64 {
+	var total int64
+	for _, shard := range shards {
+		total += shard.ProcessedRows
+	}
+	return total
 }
 
 func readMySQLBatch(task *models.SyncTask, mapping *models.SyncTaskTable, db *gorm.DB, checkpoint *models.SyncCheckpoint) ([]map[string]interface{}, []string, string, string, error) {
@@ -190,6 +319,70 @@ func readMySQLBatch(task *models.SyncTask, mapping *models.SyncTaskTable, db *go
 		batch = append(batch, row)
 	}
 	return batch, columns, lastCursor, lastPK, rows.Err()
+}
+
+func readMySQLShardBatch(task *models.SyncTask, mapping *models.SyncTaskTable, db *gorm.DB, shard *models.SyncSnapshotShardCheckpoint) ([]map[string]interface{}, []string, string, error) {
+	pk := quoteMySQL(mapping.SourcePrimaryKey)
+	sourceColumns, err := selectableSourceColumns(task, mapping, db)
+	if err != nil {
+		return nil, nil, "", err
+	}
+	if len(sourceColumns) == 0 {
+		return nil, nil, "", fmt.Errorf("没有可读取的同步字段")
+	}
+	selectList := make([]string, len(sourceColumns))
+	for i, column := range sourceColumns {
+		selectList[i] = quoteMySQL(column)
+	}
+	cursor := shard.CursorPrimaryKey
+	if cursor == "" {
+		cursor = shard.LowerBound
+	}
+	query := "SELECT " + strings.Join(selectList, ",") + " FROM " + quoteMySQL(mapping.SourceTable)
+	params := []interface{}{}
+	wheres := []string{}
+	if cursor != "" {
+		wheres = append(wheres, pk+" > ?")
+		params = append(params, cursor)
+	}
+	if shard.UpperBound != "" {
+		wheres = append(wheres, pk+" <= ?")
+		params = append(params, shard.UpperBound)
+	}
+	if len(wheres) > 0 {
+		query += " WHERE " + strings.Join(wheres, " AND ")
+	}
+	query += " ORDER BY " + pk + fmt.Sprintf(" LIMIT %d", defaultSyncBatchSize)
+	rows, err := db.Raw(query, params...).Rows()
+	if err != nil {
+		return nil, nil, "", err
+	}
+	defer rows.Close()
+	columns, err := rows.Columns()
+	if err != nil {
+		return nil, nil, "", err
+	}
+	batch := []map[string]interface{}{}
+	lastPK := ""
+	for rows.Next() {
+		values, pointers := make([]interface{}, len(columns)), make([]interface{}, len(columns))
+		for i := range values {
+			pointers[i] = &values[i]
+		}
+		if err := rows.Scan(pointers...); err != nil {
+			return nil, nil, "", err
+		}
+		row := map[string]interface{}{}
+		for i, column := range columns {
+			value := normalizeMySQLScannedValue(values[i])
+			row[column] = value
+			if column == mapping.SourcePrimaryKey {
+				lastPK = valueString(value)
+			}
+		}
+		batch = append(batch, row)
+	}
+	return batch, columns, lastPK, rows.Err()
 }
 
 func writeMySQLBatch(db *gorm.DB, mapping *models.SyncTaskTable, sourceColumns []string, batch []map[string]interface{}) error {
@@ -407,6 +600,21 @@ func saveCheckpoint(db *gorm.DB, checkpoint *models.SyncCheckpoint) error {
 	}
 	if err := db.Create(checkpoint).Error; err != nil {
 		return db.Model(&models.SyncCheckpoint{}).Where("task_table_id = ?", checkpoint.TaskTableID).Updates(updates).Error
+	}
+	return nil
+}
+
+func saveShardCheckpoint(db *gorm.DB, checkpoint *models.SyncSnapshotShardCheckpoint) error {
+	updates := map[string]interface{}{"cursor_primary_key": checkpoint.CursorPrimaryKey, "processed_rows": checkpoint.ProcessedRows, "completed": checkpoint.Completed}
+	result := db.Model(&models.SyncSnapshotShardCheckpoint{}).Where("task_table_id = ? AND shard_index = ?", checkpoint.TaskTableID, checkpoint.ShardIndex).Updates(updates)
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected > 0 {
+		return nil
+	}
+	if err := db.Create(checkpoint).Error; err != nil {
+		return db.Model(&models.SyncSnapshotShardCheckpoint{}).Where("task_table_id = ? AND shard_index = ?", checkpoint.TaskTableID, checkpoint.ShardIndex).Updates(updates).Error
 	}
 	return nil
 }

@@ -111,9 +111,14 @@ func (m *Migrator) migrateSchema(db *gorm.DB) error {
 		&models.SyncTask{},
 		&models.SyncTaskTable{},
 		&models.SyncCheckpoint{},
+		&models.SyncSnapshotShardCheckpoint{},
 		&models.SyncCDCCheckpoint{},
+		&models.SyncXAPreparedTransaction{},
 		&models.SyncLog{},
 		&models.TaskAlertState{},
+		&models.ServerMonitorSetting{},
+		&models.SyncRepairJob{},
+		&models.SyncRepairDiff{},
 	}
 
 	// 执行自动迁移

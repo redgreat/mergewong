@@ -15,6 +15,7 @@
   import PasswordModal from "./components/PasswordModal.svelte";
   import UsersPage from "./pages/UsersPage.svelte";
   import AlertsPage from "./pages/AlertsPage.svelte";
+  import ServerMonitorPage from "./pages/ServerMonitorPage.svelte";
   import AlertModal from "./components/AlertModal.svelte";
 
   let apiError = "";
@@ -246,6 +247,7 @@
   function changeView(nextView) {
     if (nextView === "users") loadUsers();
     if (nextView === "alerts") loadAlertChannels();
+    if (nextView === "server_monitor") loadTaskAlertChannels();
 	if (nextView === "logs") loadLogs();
     view = nextView;
   }
@@ -697,6 +699,8 @@
     {:else if view === "task_detail"}
       <TaskDetailPage
         task={tasks.find(t => String(t.id) === String(logTaskId)) || {}}
+        {token}
+        canManage={isAdmin}
         onBack={() => { view = "tasks"; }}
         onRefresh={loadTasks}
       />
@@ -721,6 +725,13 @@
         onOpenNew={() => openAlertModal()}
         onEdit={openAlertModal} onTest={testAlert} onDelete={deleteAlert}
         onRefresh={() => Promise.all([loadAlertChannels(), loadTaskAlertChannels()])}
+      />
+    {:else if view === "server_monitor"}
+      <ServerMonitorPage
+        {token}
+        canManage={isAdmin}
+        channels={taskAlertChannels}
+        onLoadChannels={loadTaskAlertChannels}
       />
     {:else if view === "users" && isAdmin}
       <UsersPage

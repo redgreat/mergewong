@@ -120,6 +120,10 @@ func (s *AlertService) CheckTaskAlerts(ctx context.Context) error {
 	now := time.Now()
 	for i := range tasks {
 		task := &tasks[i]
+		if task.RepairStatus == "comparing" || task.RepairStatus == "repairing" {
+			_ = s.ResolveTaskAlertSilent(task.ID, "delay")
+			continue
+		}
 		threshold := int64(task.AlertDelaySeconds)
 		delay := taskCurrentDelaySeconds(task, now)
 		if threshold > 0 && delay >= threshold {

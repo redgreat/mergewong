@@ -2,8 +2,12 @@ package services
 
 import (
 	"context"
+	"encoding/binary"
+	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"log"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -20,6 +24,13 @@ type cdcOperation struct {
 	mapping *models.SyncTaskTable
 	columns []string
 	values  []interface{}
+}
+
+type cdcOperationRecord struct {
+	Kind        string        `json:"kind"`
+	TaskTableID uint          `json:"task_table_id"`
+	Columns     []string      `json:"columns"`
+	Values      []interface{} `json:"values"`
 }
 
 type CDCManager struct {
@@ -268,6 +279,26 @@ func (m *CDCManager) stream(ctx context.Context, task *models.SyncTask, source *
 		if err != nil {
 			return err
 		}
+		if event.Header.EventType == replication.XA_PREPARE_LOG_EVENT {
+			xidKey, onePhase, parseErr := parseXAPrepareEvent(event.RawData)
+			if parseErr != nil {
+				return parseErr
+			}
+			applied := int64(len(operations))
+			if onePhase {
+				if err := applyCDCTransaction(targetDB, operations); err != nil {
+					return err
+				}
+			} else if err := m.saveXAPrepared(task.ID, xidKey, currentFile, event.Header.LogPos, operations); err != nil {
+				return err
+			}
+			operations = operations[:0]
+			sessionRows += applied
+			if err := m.advanceCheckpoint(task, checkpoint, currentFile, event.Header.LogPos, sessionRows, streamStarted, event.Header.Timestamp, &lastMetricsUpdate); err != nil {
+				return err
+			}
+			continue
+		}
 		switch e := event.Event.(type) {
 		case *replication.RotateEvent:
 			currentFile = string(e.NextLogName)
@@ -315,7 +346,29 @@ func (m *CDCManager) stream(ctx context.Context, task *models.SyncTask, source *
 				return err
 			}
 		case *replication.QueryEvent:
-			query := strings.ToUpper(strings.TrimSpace(string(e.Query)))
+			rawQuery := strings.TrimSpace(string(e.Query))
+			query := strings.ToUpper(rawQuery)
+			if action, xidKey, ok := parseXAQuery(rawQuery); ok {
+				applied := int64(0)
+				if action == "commit" {
+					prepared, err := m.loadXAPreparedOperations(task, xidKey)
+					if err != nil {
+						return err
+					}
+					applied = int64(len(prepared))
+					if err := applyCDCTransaction(targetDB, prepared); err != nil {
+						return err
+					}
+				}
+				if err := m.deleteXAPrepared(task.ID, xidKey); err != nil {
+					return err
+				}
+				sessionRows += applied
+				if err := m.advanceCheckpoint(task, checkpoint, currentFile, event.Header.LogPos, sessionRows, streamStarted, event.Header.Timestamp, &lastMetricsUpdate); err != nil {
+					return err
+				}
+				continue
+			}
 			if query == "COMMIT" {
 				applied := int64(len(operations))
 				if err := applyCDCTransaction(targetDB, operations); err != nil {
@@ -376,6 +429,162 @@ func mysqlColumnNamesFromDB(db *gorm.DB, table string) ([]string, error) {
 		names[i] = columns[i].Field
 	}
 	return names, nil
+}
+
+func parseXAPrepareEvent(raw []byte) (string, bool, error) {
+	if len(raw) < replication.EventHeaderSize+10 {
+		return "", false, fmt.Errorf("XA PREPARE 事件长度异常")
+	}
+	body := raw[replication.EventHeaderSize:]
+	onePhase := body[0] != 0
+	formatID := binary.LittleEndian.Uint32(body[1:5])
+	gtridLen := int(binary.LittleEndian.Uint32(body[5:9]))
+	bqualLen := int(body[9])
+	total := 10 + gtridLen + bqualLen
+	if len(body) < total {
+		return "", false, fmt.Errorf("XA PREPARE XID 长度异常")
+	}
+	gtrid := body[10 : 10+gtridLen]
+	bqual := body[10+gtridLen : total]
+	return xaKey(formatID, gtrid, bqual), onePhase, nil
+}
+
+func parseXAQuery(query string) (string, string, bool) {
+	upper := strings.ToUpper(strings.TrimSpace(query))
+	action := ""
+	rest := ""
+	switch {
+	case strings.HasPrefix(upper, "XA COMMIT "):
+		action, rest = "commit", strings.TrimSpace(query[len("XA COMMIT "):])
+	case strings.HasPrefix(upper, "XA ROLLBACK "):
+		action, rest = "rollback", strings.TrimSpace(query[len("XA ROLLBACK "):])
+	default:
+		return "", "", false
+	}
+	rest = trimXAOnePhase(rest)
+	xidKey, err := parseXIDKey(rest)
+	if err != nil {
+		return "", "", false
+	}
+	return action, xidKey, true
+}
+
+func trimXAOnePhase(value string) string {
+	value = strings.TrimSpace(value)
+	if strings.HasSuffix(strings.ToUpper(value), " ONE PHASE") {
+		return strings.TrimSpace(value[:len(value)-len(" ONE PHASE")])
+	}
+	return value
+}
+
+func parseXIDKey(expr string) (string, error) {
+	parts := splitXIDParts(expr)
+	if len(parts) == 0 || len(parts) > 3 {
+		return "", fmt.Errorf("XA XID 格式不支持: %s", expr)
+	}
+	gtrid, err := parseXIDBytes(parts[0])
+	if err != nil {
+		return "", err
+	}
+	bqual := []byte{}
+	if len(parts) > 1 {
+		bqual, err = parseXIDBytes(parts[1])
+		if err != nil {
+			return "", err
+		}
+	}
+	formatID := uint32(1)
+	if len(parts) > 2 {
+		parsed, err := strconv.ParseUint(strings.TrimSpace(parts[2]), 10, 32)
+		if err != nil {
+			return "", err
+		}
+		formatID = uint32(parsed)
+	}
+	return xaKey(formatID, gtrid, bqual), nil
+}
+
+func splitXIDParts(expr string) []string {
+	parts := []string{}
+	start := 0
+	inQuote := false
+	for i, r := range expr {
+		switch r {
+		case '\'':
+			inQuote = !inQuote
+		case ',':
+			if !inQuote {
+				parts = append(parts, strings.TrimSpace(expr[start:i]))
+				start = i + 1
+			}
+		}
+	}
+	parts = append(parts, strings.TrimSpace(expr[start:]))
+	return parts
+}
+
+func parseXIDBytes(value string) ([]byte, error) {
+	value = strings.TrimSpace(value)
+	upper := strings.ToUpper(value)
+	if strings.HasPrefix(upper, "X'") && strings.HasSuffix(value, "'") {
+		return hex.DecodeString(value[2 : len(value)-1])
+	}
+	if strings.HasPrefix(upper, "0X") {
+		return hex.DecodeString(value[2:])
+	}
+	if strings.HasPrefix(value, "'") && strings.HasSuffix(value, "'") {
+		return []byte(strings.ReplaceAll(value[1:len(value)-1], "''", "'")), nil
+	}
+	return []byte(value), nil
+}
+
+func xaKey(formatID uint32, gtrid, bqual []byte) string {
+	return fmt.Sprintf("%d:%s:%s", formatID, hex.EncodeToString(gtrid), hex.EncodeToString(bqual))
+}
+
+func (m *CDCManager) saveXAPrepared(taskID uint, xidKey, file string, pos uint32, operations []cdcOperation) error {
+	records := make([]cdcOperationRecord, 0, len(operations))
+	for _, op := range operations {
+		values := make([]interface{}, len(op.values))
+		for i := range op.values {
+			values[i] = normalizeMySQLScannedValue(op.values[i])
+		}
+		records = append(records, cdcOperationRecord{Kind: op.kind, TaskTableID: op.mapping.ID, Columns: op.columns, Values: values})
+	}
+	bytes, err := json.Marshal(records)
+	if err != nil {
+		return err
+	}
+	prepared := models.SyncXAPreparedTransaction{TaskID: taskID, XIDKey: xidKey, BinlogFile: file, BinlogPosition: pos, OperationsJSON: string(bytes)}
+	return m.service.systemDB.Where("task_id = ? AND xid_key = ?", taskID, xidKey).Assign(prepared).FirstOrCreate(&prepared).Error
+}
+
+func (m *CDCManager) loadXAPreparedOperations(task *models.SyncTask, xidKey string) ([]cdcOperation, error) {
+	var prepared models.SyncXAPreparedTransaction
+	if err := m.service.systemDB.Where("task_id = ? AND xid_key = ?", task.ID, xidKey).First(&prepared).Error; err != nil {
+		return nil, fmt.Errorf("XA prepared 事务不存在: %s", xidKey)
+	}
+	var records []cdcOperationRecord
+	if err := json.Unmarshal([]byte(prepared.OperationsJSON), &records); err != nil {
+		return nil, err
+	}
+	tableByID := map[uint]*models.SyncTaskTable{}
+	for i := range task.TaskTables {
+		tableByID[task.TaskTables[i].ID] = &task.TaskTables[i]
+	}
+	operations := make([]cdcOperation, 0, len(records))
+	for _, record := range records {
+		mapping := tableByID[record.TaskTableID]
+		if mapping == nil {
+			return nil, fmt.Errorf("XA prepared 事务引用了不存在的同步表: %d", record.TaskTableID)
+		}
+		operations = append(operations, cdcOperation{kind: record.Kind, mapping: mapping, columns: record.Columns, values: record.Values})
+	}
+	return operations, nil
+}
+
+func (m *CDCManager) deleteXAPrepared(taskID uint, xidKey string) error {
+	return m.service.systemDB.Where("task_id = ? AND xid_key = ?", taskID, xidKey).Delete(&models.SyncXAPreparedTransaction{}).Error
 }
 
 func applyCDCTransaction(db *gorm.DB, operations []cdcOperation) error {

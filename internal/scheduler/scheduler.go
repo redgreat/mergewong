@@ -54,6 +54,9 @@ func (s *Scheduler) Start() error {
 		if err := services.NewAlertService().CheckTaskAlerts(ctx); err != nil {
 			log.Printf("任务预警巡检失败: %v", err)
 		}
+		if err := services.NewServerMonitorService().CheckAlerts(ctx); err != nil {
+			log.Printf("服务器预警巡检失败: %v", err)
+		}
 	}); err != nil {
 		return err
 	}
