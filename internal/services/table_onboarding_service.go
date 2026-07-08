@@ -253,7 +253,11 @@ func (s *SyncService) catchupTables(task *models.SyncTask, tables []models.SyncT
 func (s *SyncService) ResumePendingTableOnboarding() {
 	var taskIDs []uint
 	states := []string{"initializing", "snapshot_completed", "catching_up"}
-	_ = s.systemDB.Model(&models.SyncTaskTable{}).Where("COALESCE(onboarding_file, '') <> '' AND sync_state IN ?", states).Distinct().Pluck("task_id", &taskIDs).Error
+	runningStates := []string{"initializing", "catching_up", "cdc_running"}
+	_ = s.systemDB.Model(&models.SyncTaskTable{}).
+		Joins("JOIN sync_tasks ON sync_tasks.id = sync_task_tables.task_id").
+		Where("COALESCE(sync_task_tables.onboarding_file, '') <> '' AND sync_task_tables.sync_state IN ? AND sync_tasks.runtime_status IN ?", states, runningStates).
+		Distinct().Pluck("sync_task_tables.task_id", &taskIDs).Error
 	for _, taskID := range taskIDs {
 		var ids []uint
 		_ = s.systemDB.Model(&models.SyncTaskTable{}).Where("task_id = ? AND COALESCE(onboarding_file, '') <> '' AND sync_state IN ?", taskID, states).Pluck("id", &ids).Error

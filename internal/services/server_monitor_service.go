@@ -99,7 +99,22 @@ func (s *ServerMonitorService) SaveSetting(setting *models.ServerMonitorSetting)
 	if setting.GoroutineThreshold <= 0 {
 		setting.GoroutineThreshold = 20000
 	}
-	return s.systemDB.Where("id = ?", 1).Assign(setting).FirstOrCreate(setting).Error
+	var existing models.ServerMonitorSetting
+	err := s.systemDB.First(&existing, 1).Error
+	if err == gorm.ErrRecordNotFound {
+		return s.systemDB.Create(setting).Error
+	}
+	if err != nil {
+		return err
+	}
+	return s.systemDB.Model(&models.ServerMonitorSetting{}).Where("id = ?", 1).Updates(map[string]interface{}{
+		"enabled":             setting.Enabled,
+		"alert_channel_id":    setting.AlertChannelID,
+		"cpu_threshold":       setting.CPUThreshold,
+		"memory_threshold":    setting.MemoryThreshold,
+		"disk_threshold":      setting.DiskThreshold,
+		"goroutine_threshold": setting.GoroutineThreshold,
+	}).Error
 }
 
 func (s *ServerMonitorService) CheckAlerts(ctx context.Context) error {

@@ -44,7 +44,7 @@
   async function saveSetting() {
     saving = true;
     try {
-      await request("/api/server/monitor-setting", { method: "PUT", token, body: { ...setting, alert_channel_id: setting.alert_channel_id ? Number(setting.alert_channel_id) : 0 } });
+      await request("/api/server/monitor-setting", { method: "PUT", token, body: { ...setting, enabled: setting.enabled === true || setting.enabled === "true", alert_channel_id: setting.alert_channel_id ? Number(setting.alert_channel_id) : 0 } });
       await loadSetting();
       error = "";
     } catch (err) { error = err.message; }
@@ -62,7 +62,6 @@
 
 <section class="workspace-panel">
   <div class="card-header">
-    <div><h2>服务器监控</h2><p>监控当前服务所在机器和数据库连接池，超过阈值会发送企业微信预警。</p></div>
     <div class="header-actions"><button class="ghost icon-text" on:click={loadMetrics}><RefreshCw size={15}/>刷新</button></div>
   </div>
   {#if error}<div class="inline-error">{error}</div>{/if}

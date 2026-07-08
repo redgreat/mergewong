@@ -77,6 +77,7 @@
       {#each task.task_tables || [] as table}<tr><td>{table.source_table}</td><td>{table.target_table}</td><td><span class={`pill ${table.sync_state === "failed" ? "danger" : table.sync_state === "active" ? "success" : "muted"}`}>{stateText(table.sync_state)}</span></td><td><div class="progress-cell"><div class="progress-track"><span style={`width:${Math.min(100, table.progress_percent || 0)}%`}></span></div><strong>{(table.progress_percent || 0).toFixed(1)}%</strong></div></td><td>{table.snapshot_processed || 0} / {table.snapshot_total || 0}</td><td>{table.progress_message || "-"}</td></tr>{/each}
     </tbody></table>
   </section>
+  <section class="workspace-panel detail-section"><div class="card-header"><div><h2>同步信息</h2></div></div><div class="detail-info-grid"><div><span>同步类型</span><strong>{task.sync_type === "full_cdc" ? "全量 + CDC" : task.sync_type === "cdc" ? "Binlog CDC" : "全量"}</strong></div><div><span>最近成功</span><strong>{task.last_success_at ? new Date(task.last_success_at).toLocaleString() : "-"}</strong></div><div><span>预警发送群</span><strong>{task.alert_channel?.name || "未配置"}</strong></div><div><span>当前阶段开始</span><strong>{task.phase_started_at ? new Date(task.phase_started_at).toLocaleString() : "-"}</strong></div></div></section>
   <section class="workspace-panel detail-section">
     <div class="card-header">
       <div><h2>数据修复</h2><p>按当前字段映射和忽略字段执行源端到目标端的一致性对比与补数。</p></div>
@@ -95,10 +96,10 @@
       </div>
     {/if}
     {#if repairError}<div class="inline-error">{repairError}</div>{/if}
-    <table class="data-table">
+    <table class="data-table repair-table">
       <thead><tr><th>类型</th><th>状态</th><th>进度</th><th>差异</th><th>已补数</th><th>说明</th><th>开始时间</th></tr></thead>
       <tbody>
-        {#if repairJobs.length === 0}<tr class="empty-row"><td colspan="7">暂无数据修复任务</td></tr>{/if}
+        {#if repairJobs.length === 0}<tr class="empty-row repair-empty-row"><td colspan="7"><div class="empty-state repair-empty"><span class="empty-icon"><ShieldAlert size={24} /></span><strong>暂无数据修复任务</strong><p>发起全量对比后，可以根据差异一键补数。</p></div></td></tr>{/if}
         {#each repairJobs as job}
           <tr>
             <td>{jobTypeText(job.job_type)}</td>
@@ -113,5 +114,4 @@
       </tbody>
     </table>
   </section>
-  <section class="workspace-panel detail-section"><div class="card-header"><div><h2>同步信息</h2></div></div><div class="detail-info-grid"><div><span>同步类型</span><strong>{task.sync_type === "full_cdc" ? "全量 + CDC" : task.sync_type === "cdc" ? "Binlog CDC" : "全量"}</strong></div><div><span>最近成功</span><strong>{task.last_success_at ? new Date(task.last_success_at).toLocaleString() : "-"}</strong></div><div><span>预警发送群</span><strong>{task.alert_channel?.name || "未配置"}</strong></div><div><span>当前阶段开始</span><strong>{task.phase_started_at ? new Date(task.phase_started_at).toLocaleString() : "-"}</strong></div></div></section>
 </section>

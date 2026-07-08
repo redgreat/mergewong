@@ -56,7 +56,8 @@ func GetCDCManager() *CDCManager {
 
 func (m *CDCManager) StartAll() {
 	var tasks []models.SyncTask
-	if err := m.service.systemDB.Where("status = ? AND validation_status = ? AND sync_type IN ?", 1, "passed", []string{"cdc", "full_cdc"}).Find(&tasks).Error; err != nil {
+	runningStates := []string{"initializing", "catching_up", "cdc_running"}
+	if err := m.service.systemDB.Where("status = ? AND validation_status = ? AND sync_type IN ? AND runtime_status IN ?", 1, "passed", []string{"cdc", "full_cdc"}, runningStates).Find(&tasks).Error; err != nil {
 		log.Printf("加载 CDC 任务失败: %v", err)
 		return
 	}

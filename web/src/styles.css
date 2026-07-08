@@ -281,6 +281,8 @@ input:focus, select:focus, textarea:focus { border-color: var(--primary); box-sh
 .repair-toolbar { display: grid; grid-template-columns: repeat(2, minmax(180px, 260px)); gap: 14px; padding: 0 24px 18px; }
 .repair-toolbar label { display: flex; flex-direction: column; gap: 7px; color: var(--text-secondary); font-size: 12px; font-weight: 550; }
 .inline-error { margin: 0 24px 14px; padding: 10px 12px; border: 1px solid color-mix(in srgb, var(--danger) 35%, transparent); border-radius: 8px; color: var(--danger); background: color-mix(in srgb, var(--danger) 8%, transparent); font-size: 13px; }
+.repair-table .repair-empty-row td { height: 190px; }
+.repair-empty { min-height: 190px; padding: 28px; }
 .server-metric-grid { padding: 0 24px 20px; }
 .monitor-section { border-top: 1px solid var(--border-soft); }
 .card-header.compact { padding-top: 18px; padding-bottom: 14px; }
