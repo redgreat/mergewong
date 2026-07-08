@@ -123,6 +123,16 @@ func validateTaskTables(tables []models.SyncTaskTable) error {
 			return fmt.Errorf("表 %s 字段映射不正确: %w", table.SourceTable, err)
 		}
 		table.FieldMapping = cleaned
+		ignored, err := normalizeIdentifierList(table.IgnoredFields)
+		if err != nil {
+			return fmt.Errorf("表 %s 忽略字段不正确: %w", table.SourceTable, err)
+		}
+		table.IgnoredFields = ignored
+		confirmed, err := normalizeIdentifierPairList(table.TypeMismatchIgnores)
+		if err != nil {
+			return fmt.Errorf("表 %s 类型忽略确认不正确: %w", table.SourceTable, err)
+		}
+		table.TypeMismatchIgnores = confirmed
 	}
 	return nil
 }
@@ -151,6 +161,45 @@ func normalizeFieldMapping(mapping models.FieldMapping) (models.FieldMapping, er
 		if source != target {
 			cleaned[source] = target
 			targets[target] = source
+		}
+	}
+	return cleaned, nil
+}
+
+func normalizeIdentifierList(values models.StringList) (models.StringList, error) {
+	cleaned := models.StringList{}
+	seen := map[string]bool{}
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		if !taskIdentifierPattern.MatchString(value) {
+			return nil, fmt.Errorf("字段名只能包含字母、数字、下划线和美元符号，且不能以数字开头")
+		}
+		if !seen[value] {
+			cleaned = append(cleaned, value)
+			seen[value] = true
+		}
+	}
+	return cleaned, nil
+}
+
+func normalizeIdentifierPairList(values models.StringList) (models.StringList, error) {
+	cleaned := models.StringList{}
+	seen := map[string]bool{}
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		parts := strings.Split(value, "->")
+		if len(parts) != 2 || !taskIdentifierPattern.MatchString(parts[0]) || !taskIdentifierPattern.MatchString(parts[1]) {
+			return nil, fmt.Errorf("确认项格式必须为 source->target")
+		}
+		if !seen[value] {
+			cleaned = append(cleaned, value)
+			seen[value] = true
 		}
 	}
 	return cleaned, nil

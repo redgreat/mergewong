@@ -76,6 +76,10 @@
     return columnCache[schemaKey(form.source_db, table.source_table)] || [];
   }
 
+  function ignoredFields(table) {
+    return table.ignored_fields || [];
+  }
+
   async function loadColumns(connection, tableName) {
     if (!connection || !tableName) return [];
     const key = schemaKey(connection, tableName);
@@ -106,6 +110,10 @@
     return Object.entries(table.field_mapping || {});
   }
 
+  function ignoredEntries(table) {
+    return ignoredFields(table);
+  }
+
   function updateMappingTarget(table, source, target) {
     table.field_mapping = { ...(table.field_mapping || {}), [source]: target };
     form.table_mappings = [...form.table_mappings];
@@ -133,6 +141,35 @@
     table.new_mapping_source = "";
     table.new_mapping_target = "";
     form.table_mappings = [...form.table_mappings];
+  }
+
+  function chooseIgnoredField(table, event) {
+    table.new_ignored_field = event.currentTarget.value;
+    form.table_mappings = [...form.table_mappings];
+  }
+
+  function addIgnoredField(table) {
+    const field = table.new_ignored_field;
+    if (!field) return;
+    table.ignored_fields = [...new Set([...(table.ignored_fields || []), field])];
+    const nextMapping = { ...(table.field_mapping || {}) };
+    delete nextMapping[field];
+    table.field_mapping = nextMapping;
+    table.new_ignored_field = "";
+    form.table_mappings = [...form.table_mappings];
+  }
+
+  function removeIgnoredField(table, field) {
+    table.ignored_fields = (table.ignored_fields || []).filter((value) => value !== field);
+    form.table_mappings = [...form.table_mappings];
+  }
+
+  function confirmTypeMismatch(item) {
+    const table = (form.table_mappings || []).find((mapping) => `${mapping.source_table} → ${mapping.target_table}` === item.object);
+    if (!table || !item.confirm_key) return;
+    table.type_mismatch_ignores = [...new Set([...(table.type_mismatch_ignores || []), item.confirm_key])];
+    form.table_mappings = [...form.table_mappings];
+    onSave();
   }
 
   function changeSourceDB(event) {
@@ -233,10 +270,18 @@
                         <div class="field-map-add">
                           <select aria-label={`${table.source_table} 的源字段`} value={table.new_mapping_source || ""} on:change={(event) => chooseMappingSource(table, event)}>
                             <option value="">选择源字段</option>
-                            {#each sourceColumns(table).filter((column) => !(table.field_mapping || {})[column]) as column}<option value={column}>{column}</option>{/each}
+                            {#each sourceColumns(table).filter((column) => !(table.field_mapping || {})[column] && !ignoredFields(table).includes(column)) as column}<option value={column}>{column}</option>{/each}
                           </select>
                           <input aria-label={`${table.source_table} 的目标字段`} bind:value={table.new_mapping_target} placeholder="目标字段名" />
                           <button type="button" class="icon-button" aria-label="添加字段映射" disabled={!table.new_mapping_source} on:click={() => addFieldMapping(table)}><Plus size={15} /></button>
+                        </div>
+                        <div class="field-map-add ignore-add">
+                          <select aria-label={`${table.source_table} 的不同步字段`} value={table.new_ignored_field || ""} on:change={(event) => chooseIgnoredField(table, event)}>
+                            <option value="">选择不同步字段</option>
+                            {#each sourceColumns(table).filter((column) => !ignoredFields(table).includes(column)) as column}<option value={column}>{column}</option>{/each}
+                          </select>
+                          <span>该字段不参与预检查和写入</span>
+                          <button type="button" class="icon-button" aria-label="添加不同步字段" disabled={!table.new_ignored_field} on:click={() => addIgnoredField(table)}><Plus size={15} /></button>
                         </div>
                         {#if mappingEntries(table).length === 0}<div class="mapping-empty">未配置字段改名，同名字段按原名同步</div>
                         {:else}
@@ -246,6 +291,17 @@
                                 <span title={source}>{source}</span>
                                 <input aria-label={`${source} 的目标字段名`} value={target} on:input={(event) => updateMappingTarget(table, source, event.currentTarget.value)} />
                                 <button type="button" class="icon-button" aria-label={`移除字段映射 ${source}`} on:click={() => removeFieldMapping(table, source)}><Trash2 size={14} /></button>
+                              </div>
+                            {/each}
+                          </div>
+                        {/if}
+                        {#if ignoredEntries(table).length > 0}
+                          <div class="field-map-list ignored-list">
+                            {#each ignoredEntries(table) as field}
+                              <div class="field-map-row ignored-row">
+                                <span title={field}>{field}</span>
+                                <em>不同步</em>
+                                <button type="button" class="icon-button" aria-label={`恢复同步字段 ${field}`} on:click={() => removeIgnoredField(table, field)}><Trash2 size={14} /></button>
                               </div>
                             {/each}
                           </div>
@@ -278,7 +334,7 @@
           </div>
           <div class="precheck-list">
             {#each precheckResult?.items || [] as item}
-              <div class={`precheck-item ${item.level}`}><span>{item.level === "success" ? "通过" : item.level === "warning" ? "提醒" : "阻断"}</span><strong>{item.object}</strong><p>{item.message}</p></div>
+              <div class={`precheck-item ${item.level}`}><span>{item.level === "success" ? "通过" : item.level === "warning" ? "提醒" : "阻断"}</span><strong>{item.object}</strong><p>{item.message}</p>{#if item.code === "type_mismatch" && item.level === "error"}<button type="button" class="ghost confirm-precheck" on:click={() => confirmTypeMismatch(item)}>确认忽略</button>{/if}</div>
             {/each}
           </div>
         {/if}

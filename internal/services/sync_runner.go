@@ -179,6 +179,10 @@ func writeMySQLBatch(db *gorm.DB, mapping *models.SyncTaskTable, sourceColumns [
 }
 
 func writeMySQLBatchTx(db *gorm.DB, mapping *models.SyncTaskTable, sourceColumns []string, batch []map[string]interface{}) error {
+	sourceColumns = syncSourceColumns(mapping, sourceColumns)
+	if len(sourceColumns) == 0 {
+		return fmt.Errorf("没有可写入的同步字段")
+	}
 	targetColumns := make([]string, len(sourceColumns))
 	for i, column := range sourceColumns {
 		targetColumns[i] = mappedColumn(mapping.FieldMapping, column)
@@ -208,6 +212,20 @@ func writeMySQLBatchTx(db *gorm.DB, mapping *models.SyncTaskTable, sourceColumns
 	}
 	query := "INSERT INTO " + quoteMySQL(mapping.TargetTable) + " (" + strings.Join(quoted, ",") + ") VALUES " + strings.Join(placeholders, ",") + " ON DUPLICATE KEY UPDATE " + strings.Join(updates, ",")
 	return db.Exec(query, args...).Error
+}
+
+func syncSourceColumns(mapping *models.SyncTaskTable, sourceColumns []string) []string {
+	filtered := make([]string, 0, len(sourceColumns))
+	ignored := map[string]bool{}
+	for _, field := range mapping.IgnoredFields {
+		ignored[field] = true
+	}
+	for _, column := range sourceColumns {
+		if !ignored[column] {
+			filtered = append(filtered, column)
+		}
+	}
+	return filtered
 }
 
 func createMySQLTableLike(sourceDB, targetDB *gorm.DB, sourceTable, targetTable string) error {

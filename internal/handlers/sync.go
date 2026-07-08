@@ -45,9 +45,11 @@ type CreateTaskRequest struct {
 }
 
 type TaskTableRequest struct {
-	SourceTable  string            `json:"source_table" binding:"required"`
-	TargetTable  string            `json:"target_table" binding:"required"`
-	FieldMapping map[string]string `json:"field_mapping"`
+	SourceTable         string            `json:"source_table" binding:"required"`
+	TargetTable         string            `json:"target_table" binding:"required"`
+	FieldMapping        map[string]string `json:"field_mapping"`
+	IgnoredFields       []string          `json:"ignored_fields"`
+	TypeMismatchIgnores []string          `json:"type_mismatch_ignores"`
 }
 
 // CreateTask 创建同步任务
@@ -89,7 +91,7 @@ func (h *SyncHandler) CreateTask(c *gin.Context) {
 	}
 	tables := make([]models.SyncTaskTable, 0, len(tableRequests))
 	for _, table := range tableRequests {
-		tables = append(tables, models.SyncTaskTable{SourceTable: table.SourceTable, TargetTable: table.TargetTable, FieldMapping: table.FieldMapping})
+		tables = append(tables, models.SyncTaskTable{SourceTable: table.SourceTable, TargetTable: table.TargetTable, FieldMapping: table.FieldMapping, IgnoredFields: table.IgnoredFields, TypeMismatchIgnores: table.TypeMismatchIgnores})
 	}
 	if err := h.syncService.CreateTaskWithTables(task, tables); err != nil {
 		utils.InternalServerError(c, "创建任务失败: "+err.Error())
@@ -199,7 +201,7 @@ func (h *SyncHandler) UpdateTask(c *gin.Context) {
 	if len(req.Tables) > 0 {
 		tables := make([]models.SyncTaskTable, 0, len(req.Tables))
 		for _, table := range req.Tables {
-			tables = append(tables, models.SyncTaskTable{SourceTable: table.SourceTable, TargetTable: table.TargetTable, FieldMapping: table.FieldMapping})
+			tables = append(tables, models.SyncTaskTable{SourceTable: table.SourceTable, TargetTable: table.TargetTable, FieldMapping: table.FieldMapping, IgnoredFields: table.IgnoredFields, TypeMismatchIgnores: table.TypeMismatchIgnores})
 		}
 		var tableErr error
 		if running {

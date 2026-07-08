@@ -11,9 +11,11 @@ import (
 )
 
 type PrecheckItem struct {
-	Level   string `json:"level"`
-	Object  string `json:"object"`
-	Message string `json:"message"`
+	Level      string `json:"level"`
+	Object     string `json:"object"`
+	Message    string `json:"message"`
+	Code       string `json:"code,omitempty"`
+	ConfirmKey string `json:"confirm_key,omitempty"`
 }
 
 type PrecheckResult struct {
@@ -35,6 +37,12 @@ func (s *SyncService) PrecheckTask(taskID uint) (*PrecheckResult, error) {
 	result := &PrecheckResult{Passed: true}
 	add := func(level, object, message string) {
 		result.Items = append(result.Items, PrecheckItem{Level: level, Object: object, Message: message})
+		if level == "error" {
+			result.Passed = false
+		}
+	}
+	addConfirmable := func(level, object, message, code, confirmKey string) {
+		result.Items = append(result.Items, PrecheckItem{Level: level, Object: object, Message: message, Code: code, ConfirmKey: confirmKey})
 		if level == "error" {
 			result.Passed = false
 		}
@@ -152,17 +160,28 @@ func (s *SyncService) PrecheckTask(taskID uint) (*PrecheckResult, error) {
 			continue
 		}
 		for sourceName := range mapping.FieldMapping {
+			if ignoredField(mapping, sourceName) {
+				add("error", object, "忽略字段不能再配置字段映射: "+sourceName)
+				continue
+			}
 			if !hasColumn(sourceColumns, sourceName) {
 				add("error", object, "字段映射的源字段不存在: "+sourceName)
 			}
 		}
 		mappedTargets := map[string]string{}
 		for _, column := range sourceColumns {
+			if ignoredField(mapping, column.Field) {
+				continue
+			}
 			targetName := mappedColumn(mapping.FieldMapping, column.Field)
 			if previous, ok := mappedTargets[targetName]; ok && previous != column.Field {
 				add("error", object, fmt.Sprintf("字段映射目标重复: %s 和 %s 都写入 %s", previous, column.Field, targetName))
 			}
 			mappedTargets[targetName] = column.Field
+		}
+		if ignoredField(mapping, pk) {
+			add("error", object, "主键字段不能忽略: "+pk)
+			continue
 		}
 		mapping.SourcePrimaryKey, mapping.TargetPrimaryKey = pk, mappedColumn(mapping.FieldMapping, pk)
 		if targetDB.Migrator().HasTable(mapping.TargetTable) {
@@ -176,6 +195,9 @@ func (s *SyncService) PrecheckTask(taskID uint) (*PrecheckResult, error) {
 				continue
 			}
 			for _, column := range sourceColumns {
+				if ignoredField(mapping, column.Field) {
+					continue
+				}
 				targetName := mappedColumn(mapping.FieldMapping, column.Field)
 				targetColumn, ok := findColumn(targetColumns, targetName)
 				if !ok {
@@ -183,7 +205,13 @@ func (s *SyncService) PrecheckTask(taskID uint) (*PrecheckResult, error) {
 					continue
 				}
 				if mysqlBaseType(column.Type) != mysqlBaseType(targetColumn.Type) {
-					add("error", object, fmt.Sprintf("字段类型不兼容: %s(%s) → %s(%s)", column.Field, column.Type, targetName, targetColumn.Type))
+					confirmKey := typeMismatchKey(column.Field, targetName)
+					message := fmt.Sprintf("字段类型不兼容: %s(%s) → %s(%s)", column.Field, column.Type, targetName, targetColumn.Type)
+					if confirmedTypeMismatch(mapping, confirmKey) {
+						addConfirmable("warning", object, "已确认忽略"+message, "type_mismatch", confirmKey)
+					} else {
+						addConfirmable("error", object, message, "type_mismatch", confirmKey)
+					}
 				}
 			}
 			add("success", object, "源表、目标表和主键检查通过")
@@ -209,7 +237,7 @@ func (s *SyncService) PrecheckTask(taskID uint) (*PrecheckResult, error) {
 					if err := tx.Create(m).Error; err != nil {
 						return err
 					}
-				} else if err := tx.Model(&models.SyncTaskTable{}).Where("id = ?", m.ID).Updates(map[string]interface{}{"source_primary_key": m.SourcePrimaryKey, "target_primary_key": m.TargetPrimaryKey}).Error; err != nil {
+				} else if err := tx.Model(&models.SyncTaskTable{}).Where("id = ?", m.ID).Updates(map[string]interface{}{"source_primary_key": m.SourcePrimaryKey, "target_primary_key": m.TargetPrimaryKey, "ignored_fields": m.IgnoredFields, "type_mismatch_ignores": m.TypeMismatchIgnores}).Error; err != nil {
 					return err
 				}
 			}
@@ -286,6 +314,28 @@ func mappedColumn(mapping models.FieldMapping, source string) string {
 		return target
 	}
 	return source
+}
+
+func ignoredField(mapping *models.SyncTaskTable, source string) bool {
+	for _, field := range mapping.IgnoredFields {
+		if field == source {
+			return true
+		}
+	}
+	return false
+}
+
+func typeMismatchKey(source, target string) string {
+	return source + "->" + target
+}
+
+func confirmedTypeMismatch(mapping *models.SyncTaskTable, key string) bool {
+	for _, confirmed := range mapping.TypeMismatchIgnores {
+		if confirmed == key {
+			return true
+		}
+	}
+	return false
 }
 
 func mysqlCurrentGrants(db *gorm.DB) (string, error) {

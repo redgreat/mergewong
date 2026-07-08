@@ -384,20 +384,25 @@ button.modal-backdrop:active:not(:disabled) { position: absolute; inset: 0; padd
 .field-map-panel { margin: 0 12px 12px; padding: 10px; background: var(--surface); border: 1px solid var(--border-soft); border-radius: 8px; }
 .field-map-add, .field-map-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 32px; align-items: center; gap: 8px; }
 .field-map-add select, .field-map-add input, .field-map-row input { min-width: 0; min-height: 34px; }
+.field-map-add.ignore-add { margin-top: 8px; }
+.field-map-add.ignore-add span, .field-map-row em { color: var(--text-muted); font-size: 12px; font-style: normal; }
 .field-map-row { margin-top: 8px; }
 .field-map-row span { overflow: hidden; color: var(--text-muted); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
 .field-map-row span::after { content: " ->"; color: var(--text-muted); }
+.field-map-row.ignored-row span::after { content: ""; }
+.ignored-list { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border-soft); }
 .field-map-panel .mapping-empty { min-height: auto; padding: 12px 4px 2px; text-align: center; }
 .precheck-summary { padding: 18px; color: var(--danger); background: color-mix(in srgb, var(--danger) 8%, transparent); border: 1px solid color-mix(in srgb, var(--danger) 28%, transparent); border-radius: 10px; }
 .precheck-summary.passed { color: var(--success); background: color-mix(in srgb, var(--success) 8%, transparent); border-color: color-mix(in srgb, var(--success) 28%, transparent); }
 .precheck-list { display: flex; flex-direction: column; gap: 10px; margin-top: 14px; }
-.precheck-item { display: grid; grid-template-columns: 54px minmax(120px, .5fr) minmax(0, 1fr); align-items: center; gap: 10px; padding: 12px 14px; background: var(--surface-subtle); border: 1px solid var(--border-soft); border-radius: 9px; }
+.precheck-item { display: grid; grid-template-columns: 54px minmax(120px, .5fr) minmax(0, 1fr) auto; align-items: center; gap: 10px; padding: 12px 14px; background: var(--surface-subtle); border: 1px solid var(--border-soft); border-radius: 9px; }
 .precheck-item > span { color: var(--text-muted); font-size: 12px; font-weight: 700; }
 .precheck-item.success > span { color: var(--success); }
 .precheck-item.error > span { color: var(--danger); }
 .precheck-item.warning > span { color: #e6a94a; }
 .precheck-item strong { overflow: hidden; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
 .precheck-item p { margin: 0; color: var(--text-secondary); font-size: 13px; }
+.confirm-precheck { min-width: 82px; padding: 6px 9px; font-size: 12px; }
 .connection-modal { width: min(680px, 96vw); max-height: calc(100vh - 48px); overflow-y: auto; }
 .connection-modal .form-grid { gap: 16px 18px; }
 .connection-modal input, .connection-modal select { width: 100%; min-height: 42px; }
