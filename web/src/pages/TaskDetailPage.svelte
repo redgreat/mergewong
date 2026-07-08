@@ -16,12 +16,52 @@
   let repairError = "";
   let cutoffColumn = "LastUpdateTime";
   let cutoffTime = "";
+  let timeColumns = [];
+  let cutoffColumnError = "";
+  let loadedCutoffTaskId = 0;
   let repairBusy = false;
 	$: snapshotTotal = (task.task_tables || []).reduce((sum, table) => sum + Number(table.snapshot_total || 0), 0);
 	$: snapshotProcessed = (task.task_tables || []).reduce((sum, table) => sum + Number(table.snapshot_processed || 0), 0);
 	$: overallPercent = snapshotTotal > 0 ? Math.min(100, snapshotProcessed * 100 / snapshotTotal) : ((task.task_tables || []).every((table) => table.sync_state === "active") ? 100 : 0);
   $: latestCompare = repairJobs.find((job) => job.job_type === "compare" && job.status === "success" && job.diff_rows > 0);
   $: runningJob = repairJobs.find((job) => job.status === "running" || job.status === "canceling");
+  $: if (task.id && token && loadedCutoffTaskId !== task.id) {
+    loadedCutoffTaskId = task.id;
+    cutoffTime = toLocalDateTimeInput(new Date());
+    loadCutoffColumns();
+  }
+  function toLocalDateTimeInput(date) {
+    const pad = (value) => String(value).padStart(2, "0");
+    return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+  }
+  function normalizeCutoffTime(value) {
+    if (!value) return "";
+    const normalized = value.replace("T", " ");
+    return normalized.length === 16 ? `${normalized}:00` : normalized;
+  }
+  const columnName = (column) => column.Field || column.field || column.COLUMN_NAME || column.column_name || "";
+  const columnType = (column) => column.Type || column.type || column.DATA_TYPE || column.data_type || "";
+  function preferredTimeColumn(columns) {
+    return columns.find((name) => name === "LastUpdateTime")
+      || columns.find((name) => name === "UpdatedAt" || name === "UpdateTime" || name === "updated_at")
+      || columns[0]
+      || cutoffColumn;
+  }
+  async function loadCutoffColumns() {
+    const firstTable = task.task_tables?.[0]?.source_table;
+    if (!firstTable || !task.source_db) return;
+    try {
+      const schema = await request(`/api/db/${encodeURIComponent(task.source_db)}/table/${encodeURIComponent(firstTable)}/schema`, { token });
+      const columns = (schema || []).filter((column) => /(date|time|timestamp)/i.test(columnType(column))).map(columnName).filter(Boolean);
+      timeColumns = columns;
+      cutoffColumnError = "";
+      if (columns.length > 0 && !columns.includes(cutoffColumn)) {
+        cutoffColumn = preferredTimeColumn(columns);
+      }
+    } catch (err) {
+      cutoffColumnError = err.message;
+    }
+  }
   async function loadRepairJobs() {
     if (!task.id || !token) return;
     try { repairJobs = await request(`/api/sync/tasks/${task.id}/repair/jobs`, { token }); repairError = ""; }
@@ -31,7 +71,7 @@
     if (!task.id || repairBusy) return;
     repairBusy = true;
     try {
-      const body = { cutoff_column: cutoffColumn.trim(), cutoff_time: cutoffTime ? cutoffTime.replace("T", " ") + ":00" : "" };
+      const body = { cutoff_column: cutoffColumn.trim(), cutoff_time: normalizeCutoffTime(cutoffTime) };
       await request(`/api/sync/tasks/${task.id}/repair/compare`, { method: "POST", token, body });
       await loadRepairJobs();
       onRefresh();
@@ -91,9 +131,16 @@
     </div>
     {#if canManage}
       <div class="repair-toolbar">
-        <label>截止字段<input bind:value={cutoffColumn} placeholder="例如 LastUpdateTime" /></label>
-        <label>截止时间<input type="datetime-local" bind:value={cutoffTime} /></label>
+        <label>截止字段
+          {#if timeColumns.length > 0}
+            <select bind:value={cutoffColumn}>{#each timeColumns as column}<option value={column}>{column}</option>{/each}</select>
+          {:else}
+            <input bind:value={cutoffColumn} placeholder="例如 LastUpdateTime" />
+          {/if}
+        </label>
+        <label>截止时间<input type="datetime-local" step="1" bind:value={cutoffTime} /></label>
       </div>
+      {#if cutoffColumnError}<div class="inline-error">{cutoffColumnError}</div>{/if}
     {/if}
     {#if repairError}<div class="inline-error">{repairError}</div>{/if}
     <table class="data-table repair-table">

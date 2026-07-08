@@ -439,5 +439,8 @@ func parseRepairTime(value string) (time.Time, error) {
 	if parsed, err := time.Parse(time.RFC3339, value); err == nil {
 		return parsed, nil
 	}
+	if parsed, err := time.ParseInLocation("2006-01-02 15:04", value, time.Local); err == nil {
+		return parsed, nil
+	}
 	return time.ParseInLocation("2006-01-02 15:04:05", value, time.Local)
 }

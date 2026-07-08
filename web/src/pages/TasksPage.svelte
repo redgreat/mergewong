@@ -13,7 +13,11 @@
   const statusText = (task) => ({ pending: "待预检查", initializing: "全量初始化", catching_up: "增量追数", cdc_running: "增量同步中", paused: "暂停", stopped: "停止", completed: "完成", failed: "失败" }[task.validation_status === "pending" ? "pending" : task.runtime_status] || "停止");
   const statusClass = (task) => task.runtime_status === "failed" ? "danger" : ["initializing", "catching_up", "cdc_running"].includes(task.runtime_status) ? "success" : "muted";
   const delayText = (seconds) => seconds == null ? "-" : `${(seconds * 1000).toLocaleString()} ms`;
-  const speedText = (speed) => speed > 0 ? `${speed >= 1000 ? (speed / 1000).toFixed(1) + "k" : speed.toFixed(1)} 行/秒` : "-";
+  const speedText = (speed) => {
+    const value = Number(speed || 0);
+    if (value <= 0) return "0r/s";
+    return `${value >= 1000 ? (value / 1000).toFixed(1) + "k" : value.toFixed(1)}r/s`;
+  };
   const canDelete = (task) => ["paused", "stopped", "completed"].includes(task.runtime_status);
 
   function openCheckpoint(task) {

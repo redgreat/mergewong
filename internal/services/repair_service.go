@@ -167,40 +167,62 @@ func (s *RepairService) compareTable(ctx context.Context, job *models.SyncRepair
 	if err != nil {
 		return err
 	}
+	sourceAllColumns, err := mysqlColumnNamesFromDB(sourceDB, mapping.SourceTable)
+	if err != nil {
+		return err
+	}
+	cutoffColumn := ""
+	if job.CutoffTime != nil && job.CutoffColumn != "" && containsString(sourceAllColumns, job.CutoffColumn) {
+		cutoffColumn = job.CutoffColumn
+	}
+	sourceTotal, err := countRepairRows(sourceDB, mapping.SourceTable, cutoffColumn, job.CutoffTime)
+	if err != nil {
+		return err
+	}
+	targetTotal, err := countRepairRows(targetDB, mapping.TargetTable, "", nil)
+	if err != nil {
+		return err
+	}
+	s.addJobTotal(job.ID, sourceTotal+targetTotal)
 	lastPK := ""
 	for {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		rows, err := readRepairRows(sourceDB, mapping.SourceTable, mapping.SourcePrimaryKey, sourcePairColumns(pairs), lastPK, job.CutoffColumn, job.CutoffTime)
+		rows, err := readRepairRows(sourceDB, mapping.SourceTable, mapping.SourcePrimaryKey, sourcePairColumns(pairs), lastPK, cutoffColumn, job.CutoffTime)
 		if err != nil {
 			return err
 		}
 		if len(rows) == 0 {
 			break
 		}
+		targetRows, err := readRowsByPKs(targetDB, mapping.TargetTable, mapping.TargetPrimaryKey, targetPairColumns(pairs), repairRowPKs(rows, mapping.SourcePrimaryKey))
+		if err != nil {
+			return err
+		}
+		diffs := make([]models.SyncRepairDiff, 0)
 		for _, row := range rows {
 			lastPK = valueString(row[mapping.SourcePrimaryKey])
-			targetRow, err := readSingleTargetRow(targetDB, mapping.TargetTable, mapping.TargetPrimaryKey, targetPairColumns(pairs), lastPK)
-			if err != nil {
-				return err
-			}
 			sourceHash := hashRepairRow(row, pairs, true)
+			targetRow := targetRows[lastPK]
 			if targetRow == nil {
-				s.recordDiff(job, mapping, lastPK, lastPK, "missing_target", sourceHash, "", "目标缺少数据")
+				diffs = append(diffs, newRepairDiff(job, mapping, lastPK, lastPK, "missing_target", sourceHash, "", "目标缺少数据"))
 			} else {
 				targetHash := hashRepairRow(targetRow, pairs, false)
 				if sourceHash != targetHash {
-					s.recordDiff(job, mapping, lastPK, lastPK, "mismatch", sourceHash, targetHash, "字段值不一致")
+					diffs = append(diffs, newRepairDiff(job, mapping, lastPK, lastPK, "mismatch", sourceHash, targetHash, "字段值不一致"))
 				}
 			}
-			s.bumpJobProgress(job.ID, 1, 0, 0)
 		}
+		if err := s.recordDiffs(job.ID, diffs); err != nil {
+			return err
+		}
+		s.bumpJobProgress(job.ID, int64(len(rows)), 0, 0)
 	}
-	return s.compareTargetExtras(ctx, job, mapping, sourceDB, targetDB, pairs)
+	return s.compareTargetExtras(ctx, job, mapping, sourceDB, targetDB, pairs, cutoffColumn)
 }
 
-func (s *RepairService) compareTargetExtras(ctx context.Context, job *models.SyncRepairJob, mapping *models.SyncTaskTable, sourceDB, targetDB *gorm.DB, pairs []syncColumnPair) error {
+func (s *RepairService) compareTargetExtras(ctx context.Context, job *models.SyncRepairJob, mapping *models.SyncTaskTable, sourceDB, targetDB *gorm.DB, pairs []syncColumnPair, cutoffColumn string) error {
 	lastPK := ""
 	for {
 		if err := ctx.Err(); err != nil {
@@ -213,16 +235,21 @@ func (s *RepairService) compareTargetExtras(ctx context.Context, job *models.Syn
 		if len(rows) == 0 {
 			return nil
 		}
+		sourceRows, err := readRowsByPKsWithCutoff(sourceDB, mapping.SourceTable, mapping.SourcePrimaryKey, []string{mapping.SourcePrimaryKey}, repairRowPKs(rows, mapping.TargetPrimaryKey), cutoffColumn, job.CutoffTime)
+		if err != nil {
+			return err
+		}
+		diffs := make([]models.SyncRepairDiff, 0)
 		for _, row := range rows {
 			lastPK = valueString(row[mapping.TargetPrimaryKey])
-			exists, err := sourcePKExists(sourceDB, mapping.SourceTable, mapping.SourcePrimaryKey, lastPK, job.CutoffColumn, job.CutoffTime)
-			if err != nil {
-				return err
-			}
-			if !exists {
-				s.recordDiff(job, mapping, lastPK, lastPK, "missing_source", "", hashRepairRow(row, pairs, false), "源端缺少数据")
+			if sourceRows[lastPK] == nil {
+				diffs = append(diffs, newRepairDiff(job, mapping, lastPK, lastPK, "missing_source", "", hashRepairRow(row, pairs, false), "源端缺少数据"))
 			}
 		}
+		if err := s.recordDiffs(job.ID, diffs); err != nil {
+			return err
+		}
+		s.bumpJobProgress(job.ID, int64(len(rows)), 0, 0)
 	}
 }
 
@@ -273,6 +300,7 @@ func (s *RepairService) repairJob(ctx context.Context, job *models.SyncRepairJob
 	if err := s.systemDB.Where("job_id = ? AND status = ? AND diff_type IN ?", diffJobID, "pending", []string{"missing_target", "mismatch"}).Order("id ASC").Find(&diffs).Error; err != nil {
 		return err
 	}
+	s.addJobTotal(job.ID, int64(len(diffs)))
 	tableByID := map[uint]*models.SyncTaskTable{}
 	for i := range task.TaskTables {
 		tableByID[task.TaskTables[i].ID] = &task.TaskTables[i]
@@ -353,19 +381,49 @@ func (s *RepairService) finishJob(ctx context.Context, job *models.SyncRepairJob
 	_ = NewSyncService().UpdateTask(job.TaskID, map[string]interface{}{"repair_status": "idle"})
 }
 
-func (s *RepairService) recordDiff(job *models.SyncRepairJob, mapping *models.SyncTaskTable, sourcePK, targetPK, diffType, sourceHash, targetHash, message string) {
-	diff := models.SyncRepairDiff{JobID: job.ID, TaskID: job.TaskID, TaskTableID: mapping.ID, SourceTable: mapping.SourceTable, TargetTable: mapping.TargetTable, SourcePK: sourcePK, TargetPK: targetPK, DiffType: diffType, SourceHash: sourceHash, TargetHash: targetHash, Status: "pending", Message: message}
-	_ = s.systemDB.Create(&diff).Error
-	s.bumpJobProgress(job.ID, 0, 1, 0)
+func newRepairDiff(job *models.SyncRepairJob, mapping *models.SyncTaskTable, sourcePK, targetPK, diffType, sourceHash, targetHash, message string) models.SyncRepairDiff {
+	return models.SyncRepairDiff{JobID: job.ID, TaskID: job.TaskID, TaskTableID: mapping.ID, SourceTable: mapping.SourceTable, TargetTable: mapping.TargetTable, SourcePK: sourcePK, TargetPK: targetPK, DiffType: diffType, SourceHash: sourceHash, TargetHash: targetHash, Status: "pending", Message: message}
+}
+
+func (s *RepairService) recordDiffs(jobID uint, diffs []models.SyncRepairDiff) error {
+	if len(diffs) == 0 {
+		return nil
+	}
+	if err := s.systemDB.CreateInBatches(diffs, 500).Error; err != nil {
+		return err
+	}
+	s.bumpJobProgress(jobID, 0, int64(len(diffs)), 0)
+	return nil
+}
+
+func (s *RepairService) addJobTotal(jobID uint, total int64) {
+	if total <= 0 {
+		return
+	}
+	_ = s.systemDB.Model(&models.SyncRepairJob{}).Where("id = ?", jobID).Update("total_rows", gorm.Expr("total_rows + ?", total)).Error
 }
 
 func (s *RepairService) bumpJobProgress(jobID uint, processed, diffs, repaired int64) {
 	_ = s.systemDB.Model(&models.SyncRepairJob{}).Where("id = ?", jobID).Updates(map[string]interface{}{
-		"processed_rows": gorm.Expr("processed_rows + ?", processed),
-		"total_rows":     gorm.Expr("total_rows + ?", processed),
-		"diff_rows":      gorm.Expr("diff_rows + ?", diffs),
-		"repaired_rows":  gorm.Expr("repaired_rows + ?", repaired),
+		"processed_rows":   gorm.Expr("processed_rows + ?", processed),
+		"diff_rows":        gorm.Expr("diff_rows + ?", diffs),
+		"repaired_rows":    gorm.Expr("repaired_rows + ?", repaired),
+		"progress_percent": gorm.Expr("CASE WHEN total_rows > 0 AND (processed_rows + ?) * 100.0 / total_rows > 99.9 THEN 99.9 WHEN total_rows > 0 THEN (processed_rows + ?) * 100.0 / total_rows ELSE progress_percent END", processed, processed),
 	}).Error
+}
+
+func countRepairRows(db *gorm.DB, table, cutoffColumn string, cutoffTime *time.Time) (int64, error) {
+	query := "SELECT COUNT(*) AS cnt FROM " + quoteMySQL(table)
+	params := []interface{}{}
+	if cutoffTime != nil && cutoffColumn != "" {
+		query += " WHERE " + quoteMySQL(cutoffColumn) + " <= ?"
+		params = append(params, *cutoffTime)
+	}
+	var count int64
+	if err := db.Raw(query, params...).Scan(&count).Error; err != nil {
+		return 0, err
+	}
+	return count, nil
 }
 
 func readRepairRows(db *gorm.DB, table, pk string, columns []string, lastPK, cutoffColumn string, cutoffTime *time.Time) ([]map[string]interface{}, error) {
@@ -388,14 +446,6 @@ func readRepairRows(db *gorm.DB, table, pk string, columns []string, lastPK, cut
 	return scanRows(db, query, params...)
 }
 
-func readSingleTargetRow(db *gorm.DB, table, pk string, columns []string, pkValue string) (map[string]interface{}, error) {
-	rows, err := scanRows(db, "SELECT "+strings.Join(quotedColumns(columns), ",")+" FROM "+quoteMySQL(table)+" WHERE "+quoteMySQL(pk)+" = ? LIMIT 1", pkValue)
-	if err != nil || len(rows) == 0 {
-		return nil, err
-	}
-	return rows[0], nil
-}
-
 func readSingleSourceRow(db *gorm.DB, table, pk string, columns []string, pkValue string) (map[string]interface{}, error) {
 	rows, err := scanRows(db, "SELECT "+strings.Join(quotedColumns(columns), ",")+" FROM "+quoteMySQL(table)+" WHERE "+quoteMySQL(pk)+" = ? LIMIT 1", pkValue)
 	if err != nil || len(rows) == 0 {
@@ -405,6 +455,14 @@ func readSingleSourceRow(db *gorm.DB, table, pk string, columns []string, pkValu
 }
 
 func readSourceRowsByPKs(db *gorm.DB, table, pk string, columns []string, pkValues []string) (map[string]map[string]interface{}, error) {
+	return readRowsByPKs(db, table, pk, columns, pkValues)
+}
+
+func readRowsByPKs(db *gorm.DB, table, pk string, columns []string, pkValues []string) (map[string]map[string]interface{}, error) {
+	return readRowsByPKsWithCutoff(db, table, pk, columns, pkValues, "", nil)
+}
+
+func readRowsByPKsWithCutoff(db *gorm.DB, table, pk string, columns []string, pkValues []string, cutoffColumn string, cutoffTime *time.Time) (map[string]map[string]interface{}, error) {
 	if len(pkValues) == 0 {
 		return map[string]map[string]interface{}{}, nil
 	}
@@ -413,7 +471,12 @@ func readSourceRowsByPKs(db *gorm.DB, table, pk string, columns []string, pkValu
 	for i := range pkValues {
 		args[i] = pkValues[i]
 	}
-	rows, err := scanRows(db, "SELECT "+strings.Join(quotedColumns(columns), ",")+" FROM "+quoteMySQL(table)+" WHERE "+quoteMySQL(pk)+" IN ("+placeholders+")", args...)
+	query := "SELECT " + strings.Join(quotedColumns(columns), ",") + " FROM " + quoteMySQL(table) + " WHERE " + quoteMySQL(pk) + " IN (" + placeholders + ")"
+	if cutoffTime != nil && cutoffColumn != "" {
+		query += " AND " + quoteMySQL(cutoffColumn) + " <= ?"
+		args = append(args, *cutoffTime)
+	}
+	rows, err := scanRows(db, query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -422,6 +485,29 @@ func readSourceRowsByPKs(db *gorm.DB, table, pk string, columns []string, pkValu
 		result[valueString(row[pk])] = row
 	}
 	return result, nil
+}
+
+func repairRowPKs(rows []map[string]interface{}, pk string) []string {
+	pks := make([]string, 0, len(rows))
+	seen := map[string]bool{}
+	for _, row := range rows {
+		value := valueString(row[pk])
+		if value == "" || seen[value] {
+			continue
+		}
+		seen[value] = true
+		pks = append(pks, value)
+	}
+	return pks
+}
+
+func containsString(values []string, target string) bool {
+	for _, value := range values {
+		if value == target {
+			return true
+		}
+	}
+	return false
 }
 
 func repairDiffPKs(diffs []models.SyncRepairDiff) []string {
