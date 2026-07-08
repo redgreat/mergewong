@@ -322,7 +322,7 @@
 
           <div class="wizard-section-title alert-title">
             <h4>预警策略</h4>
-            <div class="help-wrap"><button class="help-button" type="button" aria-label="查看预警策略说明" on:click|stopPropagation={() => toggleHelp("alert")}><CircleHelp size={16} /></button>{#if helpOpen === "alert"}<div class="help-popover">同步延迟超过阈值后立即预警；若每次提醒前延迟仍未恢复到阈值内，会在 1 小时、3 小时、6 小时后继续提醒。第 6 小时提醒会提示后续不再重复提醒；任务报错默认立即预警。</div>{/if}</div>
+            <div class="help-wrap"><button class="help-button" type="button" aria-label="查看预警策略说明" on:click|stopPropagation={() => toggleHelp("alert")}><CircleHelp size={16} /></button>{#if helpOpen === "alert"}<div class="help-popover">仅增量链路按同步延迟触发预警；全量初始化失败不发送预警。延迟超过阈值后预警，若每次提醒前仍未恢复到阈值内，会在 1 小时、3 小时、6 小时后继续提醒。第 6 小时提醒会提示后续不再重复提醒。</div>{/if}</div>
           </div>
           <div class="form-grid wizard-grid compact-grid">
             <label>预警发送方<select bind:value={form.alert_channel_id}><option value="">不发送预警</option>{#each alertChannels as channel}<option value={channel.id}>{channel.name}</option>{/each}</select></label>

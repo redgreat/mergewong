@@ -257,7 +257,7 @@ func (m *CDCManager) stream(ctx context.Context, task *models.SyncTask, source *
 	lastMetricsUpdate := time.Time{}
 	var sessionRows int64
 	_ = m.service.UpdateTask(task.ID, map[string]interface{}{"runtime_status": "catching_up", "phase_started_at": &streamStarted, "last_run_message": "增量追数中"})
-	
+
 	startTitle := "Binlog 增量同步开始"
 	if checkpoint.SnapshotCompleted && task.RowsProcessed > 0 {
 		startTitle = "Binlog 增量同步继续"
@@ -363,6 +363,10 @@ func mysqlColumnNames(connectionName, table string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
+	return mysqlColumnNamesFromDB(db, table)
+}
+
+func mysqlColumnNamesFromDB(db *gorm.DB, table string) ([]string, error) {
 	columns, err := describeMySQLTable(db, table)
 	if err != nil {
 		return nil, err
@@ -412,11 +416,6 @@ func (s *SyncService) recordCDCFailure(task *models.SyncTask, err error) {
 	now := time.Now()
 	_ = s.UpdateTask(task.ID, map[string]interface{}{"last_run_at": &now, "last_run_status": "failed", "runtime_status": "failed", "last_run_message": err.Error()})
 	s.RecordTaskEvent(task, "cdc_failed", "cdc", "failed", "CDC 同步失败", err.Error(), 0, 0)
-	if task.AlertChannel != nil && task.AlertChannel.Status == 1 {
-		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-		defer cancel()
-		_ = NewAlertService().SendTaskAlertImmediate(ctx, task, "error", fmt.Sprintf("数据同步任务报错预警\n任务：%s\n状态：CDC 链路停止\n时间：%s\n原因：%s", task.Name, now.Format("2006-01-02 15:04:05"), err.Error()))
-	}
 }
 
 func (s *SyncService) recordCDCStopped(task *models.SyncTask) {

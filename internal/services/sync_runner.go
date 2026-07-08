@@ -123,7 +123,18 @@ func (s *SyncService) syncValidatedTable(task *models.SyncTask, mapping *models.
 func readMySQLBatch(task *models.SyncTask, mapping *models.SyncTaskTable, db *gorm.DB, checkpoint *models.SyncCheckpoint) ([]map[string]interface{}, []string, string, string, error) {
 	pk := quoteMySQL(mapping.SourcePrimaryKey)
 	table := quoteMySQL(mapping.SourceTable)
-	query := "SELECT * FROM " + table
+	sourceColumns, err := selectableSourceColumns(task, mapping, db)
+	if err != nil {
+		return nil, nil, "", "", err
+	}
+	if len(sourceColumns) == 0 {
+		return nil, nil, "", "", fmt.Errorf("没有可读取的同步字段")
+	}
+	selectList := make([]string, len(sourceColumns))
+	for i, column := range sourceColumns {
+		selectList[i] = quoteMySQL(column)
+	}
+	query := "SELECT " + strings.Join(selectList, ",") + " FROM " + table
 	params := []interface{}{}
 	if task.SyncType == "incremental" {
 		cursor := quoteMySQL(mapping.IncrementalKey)
@@ -199,6 +210,10 @@ func writeMySQLBatchTx(db *gorm.DB, mapping *models.SyncTaskTable, sourceColumns
 			args = append(args, row[column])
 		}
 	}
+	expectedArgs := len(placeholders) * len(targetColumns)
+	if len(args) != expectedArgs {
+		return fmt.Errorf("写入列和值数量不一致: 目标列 %d，行数 %d，参数 %d", len(targetColumns), len(placeholders), len(args))
+	}
 	updates := []string{}
 	for _, column := range targetColumns {
 		if column != mapping.TargetPrimaryKey {
@@ -212,6 +227,37 @@ func writeMySQLBatchTx(db *gorm.DB, mapping *models.SyncTaskTable, sourceColumns
 	}
 	query := "INSERT INTO " + quoteMySQL(mapping.TargetTable) + " (" + strings.Join(quoted, ",") + ") VALUES " + strings.Join(placeholders, ",") + " ON DUPLICATE KEY UPDATE " + strings.Join(updates, ",")
 	return db.Exec(query, args...).Error
+}
+
+func selectableSourceColumns(task *models.SyncTask, mapping *models.SyncTaskTable, db *gorm.DB) ([]string, error) {
+	columns, err := mysqlColumnNamesFromDB(db, mapping.SourceTable)
+	if err != nil {
+		return nil, err
+	}
+	columns = syncSourceColumns(mapping, columns)
+	hasPK := false
+	for _, column := range columns {
+		if column == mapping.SourcePrimaryKey {
+			hasPK = true
+			break
+		}
+	}
+	if !hasPK {
+		return nil, fmt.Errorf("同步字段缺少主键列 %s", mapping.SourcePrimaryKey)
+	}
+	if task.SyncType == "incremental" && mapping.IncrementalKey != "" {
+		hasCursor := false
+		for _, column := range columns {
+			if column == mapping.IncrementalKey {
+				hasCursor = true
+				break
+			}
+		}
+		if !hasCursor {
+			return nil, fmt.Errorf("同步字段缺少增量游标列 %s", mapping.IncrementalKey)
+		}
+	}
+	return columns, nil
 }
 
 func syncSourceColumns(mapping *models.SyncTaskTable, sourceColumns []string) []string {

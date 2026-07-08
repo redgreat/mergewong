@@ -13,7 +13,7 @@ type FieldMapping map[string]string
 
 // Scan 实现 sql.Scanner 接口
 func (fm *FieldMapping) Scan(value interface{}) error {
-	bytes, ok := value.([]byte)
+	bytes, ok := jsonBytes(value)
 	if !ok {
 		return nil
 	}
@@ -29,7 +29,7 @@ func (fm FieldMapping) Value() (driver.Value, error) {
 type StringList []string
 
 func (sl *StringList) Scan(value interface{}) error {
-	bytes, ok := value.([]byte)
+	bytes, ok := jsonBytes(value)
 	if !ok {
 		return nil
 	}
@@ -38,6 +38,17 @@ func (sl *StringList) Scan(value interface{}) error {
 
 func (sl StringList) Value() (driver.Value, error) {
 	return json.Marshal(sl)
+}
+
+func jsonBytes(value interface{}) ([]byte, bool) {
+	switch typed := value.(type) {
+	case []byte:
+		return typed, true
+	case string:
+		return []byte(typed), true
+	default:
+		return nil, false
+	}
 }
 
 // SyncTask 同步任务

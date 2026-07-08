@@ -46,3 +46,17 @@ func TestNormalizeFieldMapping(t *testing.T) {
 		t.Fatalf("identity mapping should be omitted: %#v", mapping)
 	}
 }
+
+func TestSyncSourceColumnsFiltersIgnoredFields(t *testing.T) {
+	mapping := &models.SyncTaskTable{IgnoredFields: models.StringList{"IsSend"}}
+	got := syncSourceColumns(mapping, []string{"ID", "Name", "IsSend", "UpdatedAt"})
+	want := []string{"ID", "Name", "UpdatedAt"}
+	if len(got) != len(want) {
+		t.Fatalf("got %#v, want %#v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("got %#v, want %#v", got, want)
+		}
+	}
+}

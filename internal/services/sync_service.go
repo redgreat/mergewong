@@ -1,10 +1,8 @@
 package services
 
 import (
-	"context"
 	"errors"
 	"fmt"
-	stdlog "log"
 	"regexp"
 	"strings"
 	"time"
@@ -356,17 +354,6 @@ func (s *SyncService) ExecuteTask(taskID uint) error {
 		log.Message = "同步失败"
 		log.ErrorDetail = err.Error()
 		log.Duration = duration
-
-		if task.AlertChannel != nil && task.AlertChannel.Status == 1 {
-			content := fmt.Sprintf("数据同步任务报错预警\n任务：%s\n状态：执行失败\n时间：%s\n原因：%s", task.Name, time.Now().Format("2006-01-02 15:04:05"), err.Error())
-			alertCtx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-			alertErr := NewAlertService().SendTaskAlertImmediate(alertCtx, task, "error", content)
-			cancel()
-			if alertErr != nil {
-				stdlog.Printf("任务 %d 预警发送失败: %v", taskID, alertErr)
-				log.ErrorDetail += "; 预警发送失败: " + alertErr.Error()
-			}
-		}
 
 		s.systemDB.Create(log)
 		s.UpdateTask(taskID, map[string]interface{}{

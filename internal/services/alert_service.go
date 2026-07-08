@@ -6,7 +6,7 @@
 //   - 只按同步延迟阈值触发，不区分暂停、停止或追数延迟原因
 //   - 延迟超限后立即提醒一次，之后分别间隔 1 小时、3 小时、6 小时再提醒
 //   - 第 4 次提醒后不再重复提醒，直到延迟恢复到阈值内并重置状态
-//   - 执行报错立即发送（不受节流限制）
+//   - 全量初始化失败不发送预警；增量链路失败后按延迟阈值触发预警
 package services
 
 import (
@@ -85,27 +85,6 @@ var delayAlertIntervals = []time.Duration{
 	6 * time.Hour,
 }
 
-// SendTaskAlertImmediate 立即发送（跳过节流，用于错误等紧急预警）
-func (s *AlertService) SendTaskAlertImmediate(ctx context.Context, task *models.SyncTask, alertType, content string) error {
-	if task.AlertChannel == nil || task.AlertChannel.Status != 1 {
-		return nil
-	}
-	if err := s.bot.SendText(ctx, task.AlertChannel.RobotID, content); err != nil {
-		return err
-	}
-	now := time.Now()
-	var state models.TaskAlertState
-	s.systemDB.Where("task_id = ? AND alert_type = ?", task.ID, alertType).First(&state)
-	state.TaskID = task.ID
-	state.AlertType = alertType
-	state.Active = true
-	state.LastSentAt = &now
-	s.systemDB.Where("task_id = ? AND alert_type = ?", task.ID, alertType).Assign(state).FirstOrCreate(&state)
-	NewSyncService().RecordTaskEvent(task, "alert_sent", "alert", "warning", "任务报错预警已发送",
-		fmt.Sprintf("类型：%s；发送群：%s", alertType, task.AlertChannel.Name), 0, 0)
-	return nil
-}
-
 // ResolveTaskAlert 解除预警状态，并立即发送恢复通知
 func (s *AlertService) ResolveTaskAlert(ctx context.Context, task *models.SyncTask, alertType string) error {
 	var state models.TaskAlertState
@@ -156,11 +135,17 @@ func (s *AlertService) CheckTaskAlerts(ctx context.Context) error {
 }
 
 func taskCurrentDelaySeconds(task *models.SyncTask, now time.Time) int64 {
-	if task.SyncType == "full" && task.LastRunStatus == "running" && task.LastRunAt != nil {
-		return int64(now.Sub(*task.LastRunAt).Seconds())
+	if task.SyncType == "full" || task.RuntimeStatus == "initializing" {
+		return 0
 	}
-	if task.RuntimeStatus == "initializing" && task.PhaseStartedAt != nil {
-		return int64(now.Sub(*task.PhaseStartedAt).Seconds())
+	if task.RuntimeStatus == "failed" {
+		if strings.Contains(task.LastRunMessage, "全量初始化失败") {
+			return 0
+		}
+		if task.LastRunAt != nil {
+			return int64(now.Sub(*task.LastRunAt).Seconds())
+		}
+		return 0
 	}
 	if task.RuntimeStatus == "paused" || task.RuntimeStatus == "stopped" {
 		if task.LastSuccessAt != nil {

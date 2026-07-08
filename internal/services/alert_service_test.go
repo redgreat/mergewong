@@ -21,7 +21,9 @@ func TestTaskCurrentDelaySeconds(t *testing.T) {
 		{name: "cdc delay", task: models.SyncTask{SyncType: "full_cdc", RuntimeStatus: "cdc_running", DelaySeconds: 42}, want: 42},
 		{name: "paused from success", task: models.SyncTask{SyncType: "full_cdc", RuntimeStatus: "paused", LastSuccessAt: &lastSuccess, DelaySeconds: 42}, want: 7200},
 		{name: "stopped from last run", task: models.SyncTask{SyncType: "full_cdc", RuntimeStatus: "stopped", LastRunAt: &lastRun}, want: 1800},
-		{name: "initializing elapsed", task: models.SyncTask{SyncType: "full_cdc", RuntimeStatus: "initializing", PhaseStartedAt: &started}, want: 300},
+		{name: "initializing ignored", task: models.SyncTask{SyncType: "full_cdc", RuntimeStatus: "initializing", PhaseStartedAt: &started}, want: 0},
+		{name: "full failure ignored", task: models.SyncTask{SyncType: "full_cdc", RuntimeStatus: "failed", LastRunAt: &lastRun, LastRunMessage: "全量初始化失败: bad"}, want: 0},
+		{name: "cdc failure elapsed", task: models.SyncTask{SyncType: "full_cdc", RuntimeStatus: "failed", LastRunAt: &lastRun, LastRunMessage: "binlog disconnected"}, want: 1800},
 	}
 
 	for _, tt := range tests {
