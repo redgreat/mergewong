@@ -160,8 +160,8 @@ func (s *SyncService) ValidateTaskConnections(sourceName, targetName string) err
 	checks := []struct{ name, required string }{{sourceName, "source"}, {targetName, "target"}}
 	for _, check := range checks {
 		var connection models.DatabaseConnection
-		if err := s.systemDB.Where("name = ? AND status = ?", check.name, 1).First(&connection).Error; err != nil {
-			return fmt.Errorf("数据库连接 %s 不存在或已禁用", check.name)
+		if err := s.systemDB.Where("name = ?", check.name).First(&connection).Error; err != nil {
+			return fmt.Errorf("数据库连接 %s 不存在", check.name)
 		}
 		if connection.Usage != "both" && connection.Usage != check.required {
 			label := "源端"
