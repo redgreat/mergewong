@@ -208,32 +208,56 @@ func writeMySQLBatchTx(db *gorm.DB, mapping *models.SyncTaskTable, sourceColumns
 	for i, column := range targetColumns {
 		quoted[i] = quoteMySQL(column)
 	}
-	rowPlaceholder := "(" + strings.TrimSuffix(strings.Repeat("?,", len(targetColumns)), ",") + ")"
-	placeholders, args := make([]string, 0, len(batch)), make([]interface{}, 0, len(batch)*len(targetColumns))
+	placeholders, args := buildMySQLInsertValues(sourceColumns, batch)
+	expectedArgs := len(placeholders) * len(targetColumns)
+	if len(args) != expectedArgs {
+		return fmt.Errorf("写入列和值数量不一致: 目标列 %d，行数 %d，参数 %d", len(targetColumns), len(placeholders), len(args))
+	}
+	query := buildMySQLUpsertQuery(mapping.TargetTable, targetColumns, quoted, placeholders, mapping.TargetPrimaryKey)
+	if err := db.Exec(query, args...).Error; err != nil {
+		if len(batch) > 1 && strings.Contains(err.Error(), "1136") {
+			return writeMySQLRowsOneByOne(db, mapping, sourceColumns, targetColumns, quoted, batch, err)
+		}
+		return fmt.Errorf("%w；写入字段数=%d，批次行数=%d，目标字段=%s，忽略源字段=%s", err, len(targetColumns), len(batch), strings.Join(targetColumns, ","), strings.Join([]string(mapping.IgnoredFields), ","))
+	}
+	return nil
+}
+
+func buildMySQLInsertValues(sourceColumns []string, batch []map[string]interface{}) ([]string, []interface{}) {
+	rowPlaceholder := "(" + strings.TrimSuffix(strings.Repeat("?,", len(sourceColumns)), ",") + ")"
+	placeholders := make([]string, 0, len(batch))
+	args := make([]interface{}, 0, len(batch)*len(sourceColumns))
 	for _, row := range batch {
 		placeholders = append(placeholders, rowPlaceholder)
 		for _, column := range sourceColumns {
 			args = append(args, row[column])
 		}
 	}
-	expectedArgs := len(placeholders) * len(targetColumns)
-	if len(args) != expectedArgs {
-		return fmt.Errorf("写入列和值数量不一致: 目标列 %d，行数 %d，参数 %d", len(targetColumns), len(placeholders), len(args))
-	}
+	return placeholders, args
+}
+
+func buildMySQLUpsertQuery(targetTable string, targetColumns, quoted, placeholders []string, targetPrimaryKey string) string {
 	updates := []string{}
 	for _, column := range targetColumns {
-		if column != mapping.TargetPrimaryKey {
+		if column != targetPrimaryKey {
 			q := quoteMySQL(column)
 			updates = append(updates, q+"=VALUES("+q+")")
 		}
 	}
 	if len(updates) == 0 {
-		q := quoteMySQL(mapping.TargetPrimaryKey)
+		q := quoteMySQL(targetPrimaryKey)
 		updates = append(updates, q+"=VALUES("+q+")")
 	}
-	query := "INSERT INTO " + quoteMySQL(mapping.TargetTable) + " (" + strings.Join(quoted, ",") + ") VALUES " + strings.Join(placeholders, ",") + " ON DUPLICATE KEY UPDATE " + strings.Join(updates, ",")
-	if err := db.Exec(query, args...).Error; err != nil {
-		return fmt.Errorf("%w；写入字段数=%d，批次行数=%d，目标字段=%s，忽略源字段=%s", err, len(targetColumns), len(batch), strings.Join(targetColumns, ","), strings.Join([]string(mapping.IgnoredFields), ","))
+	return "INSERT INTO " + quoteMySQL(targetTable) + " (" + strings.Join(quoted, ",") + ") VALUES " + strings.Join(placeholders, ",") + " ON DUPLICATE KEY UPDATE " + strings.Join(updates, ",")
+}
+
+func writeMySQLRowsOneByOne(db *gorm.DB, mapping *models.SyncTaskTable, sourceColumns, targetColumns, quoted []string, batch []map[string]interface{}, batchErr error) error {
+	for _, row := range batch {
+		placeholders, args := buildMySQLInsertValues(sourceColumns, []map[string]interface{}{row})
+		query := buildMySQLUpsertQuery(mapping.TargetTable, targetColumns, quoted, placeholders, mapping.TargetPrimaryKey)
+		if err := db.Exec(query, args...).Error; err != nil {
+			return fmt.Errorf("%w；批量写入曾失败=%v；单行写入失败，主键=%v，写入字段数=%d，目标字段=%s，忽略源字段=%s", err, batchErr, row[mapping.SourcePrimaryKey], len(targetColumns), strings.Join(targetColumns, ","), strings.Join([]string(mapping.IgnoredFields), ","))
+		}
 	}
 	return nil
 }
