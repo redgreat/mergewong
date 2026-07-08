@@ -166,7 +166,7 @@ func (m *CDCManager) run(ctx context.Context, task *models.SyncTask) error {
 		}
 	}
 	activatedAt := time.Now()
-	_ = m.service.systemDB.Model(&models.SyncTaskTable{}).Where("task_id = ? AND COALESCE(onboarding_file, '') = '' AND sync_state IN ?", task.ID, []string{"pending", "snapshot_completed"}).Updates(map[string]interface{}{"sync_state": "active", "progress_percent": 100, "activated_at": &activatedAt, "progress_message": "已合并到主同步链路"}).Error
+	_ = m.service.systemDB.Model(&models.SyncTaskTable{}).Where("task_id = ? AND COALESCE(onboarding_file, '') = '' AND sync_state IN ?", task.ID, []string{"pending", "snapshot_completed", "failed"}).Updates(map[string]interface{}{"sync_state": "active", "progress_percent": 100, "activated_at": &activatedAt, "progress_message": "已合并到主同步链路"}).Error
 	task, _ = m.service.GetTask(task.ID)
 	return m.stream(ctx, task, &source, checkpoint)
 }

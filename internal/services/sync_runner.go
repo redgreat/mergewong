@@ -39,6 +39,7 @@ func (s *SyncService) syncValidatedTask(task *models.SyncTask) (int64, error) {
 	for i := range task.TaskTables {
 		rows, err := s.syncValidatedTable(task, &task.TaskTables[i], sourceDB, targetDB)
 		if err != nil {
+			_ = updateTaskTableProgress(s.systemDB, task.TaskTables[i].ID, map[string]interface{}{"sync_state": "failed", "progress_message": err.Error()})
 			return total, fmt.Errorf("表 %s 同步失败: %w", task.TaskTables[i].SourceTable, err)
 		}
 		total += rows
@@ -72,7 +73,7 @@ func (s *SyncService) syncValidatedTable(task *models.SyncTask, mapping *models.
 		return 0, err
 	}
 	processed := mapping.SnapshotProcessed
-	_ = s.systemDB.Model(mapping).Updates(map[string]interface{}{"sync_state": "initializing", "snapshot_total": sourceTotal, "progress_message": "正在全量初始化"}).Error
+	_ = updateTaskTableProgress(s.systemDB, mapping.ID, map[string]interface{}{"sync_state": "initializing", "snapshot_total": sourceTotal, "progress_message": "正在全量初始化"})
 	var total int64
 	for {
 		var runtime struct{ RuntimeStatus string }
@@ -91,7 +92,7 @@ func (s *SyncService) syncValidatedTable(task *models.SyncTask, mapping *models.
 			if err := saveCheckpoint(s.systemDB, &checkpoint); err != nil {
 				return total, err
 			}
-			if err := s.systemDB.Model(mapping).Updates(map[string]interface{}{"sync_state": "snapshot_completed", "snapshot_processed": sourceTotal, "progress_percent": 100, "progress_message": "全量初始化完成"}).Error; err != nil {
+			if err := updateTaskTableProgress(s.systemDB, mapping.ID, map[string]interface{}{"sync_state": "snapshot_completed", "snapshot_processed": sourceTotal, "progress_percent": 100, "progress_message": "全量初始化完成"}); err != nil {
 				return total, err
 			}
 			if current, loadErr := s.GetTask(task.ID); loadErr == nil {
@@ -115,10 +116,14 @@ func (s *SyncService) syncValidatedTable(task *models.SyncTask, mapping *models.
 				percent = 100
 			}
 		}
-		if err := s.systemDB.Model(mapping).Updates(map[string]interface{}{"snapshot_processed": processed, "snapshot_total": sourceTotal, "progress_percent": percent, "progress_message": fmt.Sprintf("已初始化 %d / %d 行", processed, sourceTotal)}).Error; err != nil {
+		if err := updateTaskTableProgress(s.systemDB, mapping.ID, map[string]interface{}{"sync_state": "initializing", "snapshot_processed": processed, "snapshot_total": sourceTotal, "progress_percent": percent, "progress_message": fmt.Sprintf("已初始化 %d / %d 行", processed, sourceTotal)}); err != nil {
 			return total, err
 		}
 	}
+}
+
+func updateTaskTableProgress(db *gorm.DB, tableID uint, updates map[string]interface{}) error {
+	return db.Model(&models.SyncTaskTable{}).Where("id = ?", tableID).Updates(updates).Error
 }
 
 func readMySQLBatch(task *models.SyncTask, mapping *models.SyncTaskTable, db *gorm.DB, checkpoint *models.SyncCheckpoint) ([]map[string]interface{}, []string, string, string, error) {
@@ -392,7 +397,18 @@ func createMySQLTableLike(sourceDB, targetDB *gorm.DB, sourceTable, targetTable 
 }
 
 func saveCheckpoint(db *gorm.DB, checkpoint *models.SyncCheckpoint) error {
-	return db.Where("task_table_id = ?", checkpoint.TaskTableID).Assign(map[string]interface{}{"cursor_value": checkpoint.CursorValue, "cursor_primary_key": checkpoint.CursorPrimaryKey, "completed": checkpoint.Completed}).FirstOrCreate(checkpoint).Error
+	updates := map[string]interface{}{"cursor_value": checkpoint.CursorValue, "cursor_primary_key": checkpoint.CursorPrimaryKey, "completed": checkpoint.Completed}
+	result := db.Model(&models.SyncCheckpoint{}).Where("task_table_id = ?", checkpoint.TaskTableID).Updates(updates)
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected > 0 {
+		return nil
+	}
+	if err := db.Create(checkpoint).Error; err != nil {
+		return db.Model(&models.SyncCheckpoint{}).Where("task_table_id = ?", checkpoint.TaskTableID).Updates(updates).Error
+	}
+	return nil
 }
 
 func quoteMySQL(identifier string) string {
