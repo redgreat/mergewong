@@ -194,6 +194,10 @@ func (s *SyncService) PrecheckTask(taskID uint) (*PrecheckResult, error) {
 				add("error", object, "目标表必须使用单列主键: "+mapping.TargetPrimaryKey)
 				continue
 			}
+			triggers, triggerErr := mysqlTriggerNames(targetDB, mapping.TargetTable)
+			if triggerErr == nil && len(triggers) > 0 {
+				add("warning", object, "目标表存在触发器: "+strings.Join(triggers, "、")+"；若触发器内部 INSERT 未指定列清单，可能导致 Column count doesn't match value count")
+			}
 			for _, column := range sourceColumns {
 				if ignoredField(mapping, column.Field) {
 					continue
@@ -353,4 +357,42 @@ func mysqlCurrentGrants(db *gorm.DB) (string, error) {
 		grants = append(grants, grant)
 	}
 	return strings.Join(grants, "\n"), rows.Err()
+}
+
+func mysqlTriggerNames(db *gorm.DB, table string) ([]string, error) {
+	if !taskIdentifierPattern.MatchString(table) {
+		return nil, fmt.Errorf("非法表名")
+	}
+	rows, err := db.Raw("SHOW TRIGGERS WHERE `Table` = ?", table).Rows()
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	columns, err := rows.Columns()
+	if err != nil {
+		return nil, err
+	}
+	triggerIndex := -1
+	for i, column := range columns {
+		if strings.EqualFold(column, "Trigger") {
+			triggerIndex = i
+			break
+		}
+	}
+	if triggerIndex < 0 {
+		return nil, nil
+	}
+	triggers := []string{}
+	for rows.Next() {
+		values := make([]interface{}, len(columns))
+		pointers := make([]interface{}, len(columns))
+		for i := range values {
+			pointers[i] = &values[i]
+		}
+		if err := rows.Scan(pointers...); err != nil {
+			return nil, err
+		}
+		triggers = append(triggers, valueString(values[triggerIndex]))
+	}
+	return triggers, rows.Err()
 }

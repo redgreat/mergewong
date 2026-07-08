@@ -387,7 +387,7 @@ func applyCDCTransaction(db *gorm.DB, operations []cdcOperation) error {
 			if op.kind == "upsert" {
 				row := map[string]interface{}{}
 				for i, column := range op.columns {
-					row[column] = op.values[i]
+					row[column] = normalizeMySQLScannedValue(op.values[i])
 				}
 				if err := writeMySQLBatchTx(tx, op.mapping, op.columns, []map[string]interface{}{row}); err != nil {
 					return err
@@ -404,7 +404,7 @@ func applyCDCTransaction(db *gorm.DB, operations []cdcOperation) error {
 			if pkIndex < 0 {
 				return fmt.Errorf("表 %s 缺少主键列", op.mapping.SourceTable)
 			}
-			if err := tx.Exec("DELETE FROM "+quoteMySQL(op.mapping.TargetTable)+" WHERE "+quoteMySQL(op.mapping.TargetPrimaryKey)+" = ?", op.values[pkIndex]).Error; err != nil {
+			if err := tx.Exec("DELETE FROM "+quoteMySQL(op.mapping.TargetTable)+" WHERE "+quoteMySQL(op.mapping.TargetPrimaryKey)+" = ?", normalizeMySQLScannedValue(op.values[pkIndex])).Error; err != nil {
 				return err
 			}
 		}

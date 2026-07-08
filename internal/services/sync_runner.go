@@ -173,12 +173,13 @@ func readMySQLBatch(task *models.SyncTask, mapping *models.SyncTaskTable, db *go
 		}
 		row := map[string]interface{}{}
 		for i, column := range columns {
-			row[column] = values[i]
+			value := normalizeMySQLScannedValue(values[i])
+			row[column] = value
 			if column == mapping.SourcePrimaryKey {
-				lastPK = valueString(values[i])
+				lastPK = valueString(value)
 			}
 			if task.SyncType == "incremental" && column == mapping.IncrementalKey {
-				lastCursor = valueString(values[i])
+				lastCursor = valueString(value)
 			}
 		}
 		batch = append(batch, row)
@@ -256,10 +257,36 @@ func writeMySQLRowsOneByOne(db *gorm.DB, mapping *models.SyncTaskTable, sourceCo
 		placeholders, args := buildMySQLInsertValues(sourceColumns, []map[string]interface{}{row})
 		query := buildMySQLUpsertQuery(mapping.TargetTable, targetColumns, quoted, placeholders, mapping.TargetPrimaryKey)
 		if err := db.Exec(query, args...).Error; err != nil {
-			return fmt.Errorf("%w；批量写入曾失败=%v；单行写入失败，主键=%v，写入字段数=%d，目标字段=%s，忽略源字段=%s", err, batchErr, row[mapping.SourcePrimaryKey], len(targetColumns), strings.Join(targetColumns, ","), strings.Join([]string(mapping.IgnoredFields), ","))
+			setErr := writeMySQLRowWithSetSyntax(db, mapping, sourceColumns, targetColumns, row)
+			if setErr == nil {
+				continue
+			}
+			return fmt.Errorf("%w；批量写入曾失败=%v；单行 VALUES 写入失败=%v；单行 SET 写入仍失败，主键=%v，写入字段数=%d，目标字段=%s，忽略源字段=%s。此时字段和值数量已经由 SET 语法规避，若仍为 1136，通常是目标表触发器、视图或目标端内部 INSERT 语句列数不匹配", setErr, batchErr, err, row[mapping.SourcePrimaryKey], len(targetColumns), strings.Join(targetColumns, ","), strings.Join([]string(mapping.IgnoredFields), ","))
 		}
 	}
 	return nil
+}
+
+func writeMySQLRowWithSetSyntax(db *gorm.DB, mapping *models.SyncTaskTable, sourceColumns, targetColumns []string, row map[string]interface{}) error {
+	assignments := make([]string, len(targetColumns))
+	args := make([]interface{}, 0, len(targetColumns))
+	for i, target := range targetColumns {
+		assignments[i] = quoteMySQL(target) + "=?"
+		args = append(args, row[sourceColumns[i]])
+	}
+	updates := []string{}
+	for _, target := range targetColumns {
+		if target != mapping.TargetPrimaryKey {
+			q := quoteMySQL(target)
+			updates = append(updates, q+"=VALUES("+q+")")
+		}
+	}
+	if len(updates) == 0 {
+		q := quoteMySQL(mapping.TargetPrimaryKey)
+		updates = append(updates, q+"=VALUES("+q+")")
+	}
+	query := "INSERT INTO " + quoteMySQL(mapping.TargetTable) + " SET " + strings.Join(assignments, ",") + " ON DUPLICATE KEY UPDATE " + strings.Join(updates, ",")
+	return db.Exec(query, args...).Error
 }
 
 func selectableSourceColumns(task *models.SyncTask, mapping *models.SyncTaskTable, db *gorm.DB) ([]string, error) {
@@ -377,4 +404,11 @@ func valueString(value interface{}) string {
 		return string(bytes)
 	}
 	return fmt.Sprint(value)
+}
+
+func normalizeMySQLScannedValue(value interface{}) interface{} {
+	if bytes, ok := value.([]byte); ok {
+		return string(bytes)
+	}
+	return value
 }
