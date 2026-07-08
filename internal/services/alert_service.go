@@ -3,9 +3,10 @@
 // 创建人: redgreat
 //
 // 预警策略：
-//   - 延迟阈值触发后，每 10 分钟发送一次，连续 3 次后静默 12 小时，再次循环
+//   - 只按同步延迟阈值触发，不区分暂停、停止或追数延迟原因
+//   - 延迟超限后立即提醒一次，之后分别间隔 1 小时、3 小时、6 小时再提醒
+//   - 第 4 次提醒后不再重复提醒，直到延迟恢复到阈值内并重置状态
 //   - 执行报错立即发送（不受节流限制）
-//   - 恢复后立即发送恢复通知
 package services
 
 import (
@@ -20,9 +21,7 @@ import (
 )
 
 const (
-	alertIntervalMinutes = 10
-	alertMaxCount        = 3
-	alertSilenceHours    = 12
+	finalDelayAlertWarning = "本次为该轮延迟超限的最后一次预警，后续不再重复提醒；请尽快处理或确认任务已恢复。"
 )
 
 type AlertService struct {
@@ -30,7 +29,7 @@ type AlertService struct {
 	bot      *WecomBotService
 }
 
-// SendTaskAlert 发送任务预警，实现节流：每10分钟一次，3次后静默12小时，循环
+// SendTaskAlert 发送延迟预警：首次立即发送，后续按 1h、3h、6h 提醒，最终提醒后静默。
 func (s *AlertService) SendTaskAlert(ctx context.Context, task *models.SyncTask, alertType, content string) error {
 	if task.AlertChannel == nil || task.AlertChannel.Status != 1 {
 		return nil
@@ -42,24 +41,18 @@ func (s *AlertService) SendTaskAlert(ctx context.Context, task *models.SyncTask,
 	}
 	now := time.Now()
 
-	// 处于静默期
 	if state.SilentAt != nil {
-		silenceEnd := state.SilentAt.Add(alertSilenceHours * time.Hour)
-		if now.Before(silenceEnd) {
-			return nil
-		}
-		// 静默期结束，重置计数重新开始
-		state.AlertCount = 0
-		state.SilentAt = nil
+		return nil
 	}
 
-	// 检查发送间隔（使用任务配置的冷却时间）
-	cooldown := task.AlertCooldownMinutes
-	if cooldown < 1 {
-		cooldown = alertIntervalMinutes
-	}
-	if state.LastSentAt != nil && now.Sub(*state.LastSentAt) < time.Duration(cooldown)*time.Minute {
+	if state.LastSentAt != nil && state.AlertCount < len(delayAlertIntervals) && now.Sub(*state.LastSentAt) < delayAlertIntervals[state.AlertCount] {
 		return nil
+	}
+	if state.AlertCount >= len(delayAlertIntervals) {
+		return nil
+	}
+	if state.AlertCount == len(delayAlertIntervals)-1 {
+		content += "\n" + finalDelayAlertWarning
 	}
 
 	if err := s.bot.SendText(ctx, task.AlertChannel.RobotID, content); err != nil {
@@ -72,10 +65,8 @@ func (s *AlertService) SendTaskAlert(ctx context.Context, task *models.SyncTask,
 	state.AlertCount++
 	state.LastSentAt = &now
 
-	// 达到最大次数，进入静默
-	if state.AlertCount >= alertMaxCount {
+	if state.AlertCount >= len(delayAlertIntervals) {
 		state.SilentAt = &now
-		state.AlertCount = 0
 	}
 
 	if err := s.systemDB.Where("task_id = ? AND alert_type = ?", task.ID, alertType).
@@ -85,6 +76,13 @@ func (s *AlertService) SendTaskAlert(ctx context.Context, task *models.SyncTask,
 	NewSyncService().RecordTaskEvent(task, "alert_sent", "alert", "warning", "任务预警已发送",
 		fmt.Sprintf("类型：%s；发送群：%s", alertType, task.AlertChannel.Name), 0, 0)
 	return nil
+}
+
+var delayAlertIntervals = []time.Duration{
+	0,
+	time.Hour,
+	3 * time.Hour,
+	6 * time.Hour,
 }
 
 // SendTaskAlertImmediate 立即发送（跳过节流，用于错误等紧急预警）
@@ -132,7 +130,7 @@ func (s *AlertService) ResolveTaskAlertSilent(taskID uint, alertType string) err
 		Updates(map[string]interface{}{"active": false, "alert_count": 0, "silent_at": nil}).Error
 }
 
-// CheckTaskAlerts 检测运行延迟和停止预警
+// CheckTaskAlerts 检测同步延迟预警。
 func (s *AlertService) CheckTaskAlerts(ctx context.Context) error {
 	var tasks []models.SyncTask
 	if err := s.systemDB.Preload("AlertChannel").
@@ -144,52 +142,35 @@ func (s *AlertService) CheckTaskAlerts(ctx context.Context) error {
 	for i := range tasks {
 		task := &tasks[i]
 		threshold := int64(task.AlertDelaySeconds)
-
-		if task.SyncType == "full" {
-			// 全量：以运行时长判断
-			if threshold > 0 && task.LastRunStatus == "running" && task.LastRunAt != nil {
-				elapsed := int64(now.Sub(*task.LastRunAt).Seconds())
-				if elapsed >= threshold {
-					content := fmt.Sprintf("数据同步任务延迟预警\n任务：%s\n已运行：%d 秒\n阈值：%d 秒",
-						task.Name, elapsed, threshold)
-					_ = s.SendTaskAlert(ctx, task, "delay", content)
-				} else {
-					_ = s.ResolveTaskAlertSilent(task.ID, "delay")
-				}
-			} else {
-				_ = s.ResolveTaskAlertSilent(task.ID, "delay")
-			}
+		delay := taskCurrentDelaySeconds(task, now)
+		if threshold > 0 && delay >= threshold {
+			content := fmt.Sprintf("数据同步任务延迟预警\n任务：%s\n当前延迟：%d 秒\n阈值：%d 秒\n状态：%s",
+				task.Name, delay, threshold, runtimeLabel(task.RuntimeStatus))
+			_ = s.SendTaskAlert(ctx, task, "delay", content)
 		} else {
-			// CDC / full_cdc：以 delay_seconds 判断
-			if threshold > 0 && task.DelaySeconds >= threshold {
-				content := fmt.Sprintf("数据同步任务延迟预警\n任务：%s\n当前延迟：%d 秒\n阈值：%d 秒",
-					task.Name, task.DelaySeconds, threshold)
-				_ = s.SendTaskAlert(ctx, task, "delay", content)
-			} else {
-				_ = s.ResolveTaskAlertSilent(task.ID, "delay")
-			}
+			_ = s.ResolveTaskAlertSilent(task.ID, "delay")
 		}
-
-		// 停止预警：仅对定时任务生效，CDC 任务持续运行不适用
-		stoppedThreshold := int64(task.AlertStoppedMinutes)
-		if stoppedThreshold > 0 && task.SyncType != "cdc" && task.SyncType != "full_cdc" {
-			if task.LastRunAt != nil {
-				elapsed := int64(now.Sub(*task.LastRunAt).Minutes())
-				if task.LastRunStatus != "running" && elapsed >= stoppedThreshold {
-					content := fmt.Sprintf("MergeWong 任务停止预警\n任务：%s\n距上次启动：%d 分钟\n阈值：%d 分钟",
-						task.Name, elapsed, stoppedThreshold)
-					_ = s.SendTaskAlert(ctx, task, "stopped", content)
-				} else {
-					_ = s.ResolveTaskAlertSilent(task.ID, "stopped")
-				}
-			} else {
-				_ = s.ResolveTaskAlertSilent(task.ID, "stopped")
-			}
-		} else {
-			_ = s.ResolveTaskAlertSilent(task.ID, "stopped")
-		}
+		_ = s.ResolveTaskAlertSilent(task.ID, "stopped")
 	}
 	return nil
+}
+
+func taskCurrentDelaySeconds(task *models.SyncTask, now time.Time) int64 {
+	if task.SyncType == "full" && task.LastRunStatus == "running" && task.LastRunAt != nil {
+		return int64(now.Sub(*task.LastRunAt).Seconds())
+	}
+	if task.RuntimeStatus == "initializing" && task.PhaseStartedAt != nil {
+		return int64(now.Sub(*task.PhaseStartedAt).Seconds())
+	}
+	if task.RuntimeStatus == "paused" || task.RuntimeStatus == "stopped" {
+		if task.LastSuccessAt != nil {
+			return int64(now.Sub(*task.LastSuccessAt).Seconds())
+		}
+		if task.LastRunAt != nil {
+			return int64(now.Sub(*task.LastRunAt).Seconds())
+		}
+	}
+	return task.DelaySeconds
 }
 
 func NewAlertService() *AlertService {

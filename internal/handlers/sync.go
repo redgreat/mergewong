@@ -38,6 +38,7 @@ type CreateTaskRequest struct {
 	IntervalMinutes      int                `json:"interval_minutes"`
 	AlertChannelID       *uint              `json:"alert_channel_id"`
 	AlertDelaySeconds    int                `json:"alert_delay_seconds"`
+	AlertDelayMS         int                `json:"alert_delay_ms"`
 	AlertStoppedMinutes  int                `json:"alert_stopped_minutes"`
 	AlertOnError         bool               `json:"alert_on_error"`
 	AlertCooldownMinutes int                `json:"alert_cooldown_minutes"`
@@ -58,6 +59,10 @@ func (h *SyncHandler) CreateTask(c *gin.Context) {
 	}
 
 	userID, _ := c.Get("user_id")
+	alertDelaySeconds := req.AlertDelaySeconds
+	if req.AlertDelayMS > 0 {
+		alertDelaySeconds = (req.AlertDelayMS + 999) / 1000
+	}
 	task := &models.SyncTask{
 		Name:                 req.Name,
 		SourceDB:             req.SourceDB,
@@ -70,10 +75,10 @@ func (h *SyncHandler) CreateTask(c *gin.Context) {
 		ScheduleType:         req.ScheduleType,
 		IntervalMinutes:      req.IntervalMinutes,
 		AlertChannelID:       req.AlertChannelID,
-		AlertDelaySeconds:    req.AlertDelaySeconds,
-		AlertStoppedMinutes:  req.AlertStoppedMinutes,
-		AlertOnError:         req.AlertOnError,
-		AlertCooldownMinutes: req.AlertCooldownMinutes,
+		AlertDelaySeconds:    alertDelaySeconds,
+		AlertStoppedMinutes:  0,
+		AlertOnError:         true,
+		AlertCooldownMinutes: 0,
 		Status:               1,
 		UserID:               userID.(uint),
 	}
@@ -136,6 +141,7 @@ func (h *SyncHandler) GetTask(c *gin.Context) {
 type UpdateTaskRequest struct {
 	AlertChannelID       *uint              `json:"alert_channel_id"`
 	AlertDelaySeconds    int                `json:"alert_delay_seconds"`
+	AlertDelayMS         int                `json:"alert_delay_ms"`
 	AlertStoppedMinutes  *int               `json:"alert_stopped_minutes"`
 	AlertOnError         *bool              `json:"alert_on_error"`
 	AlertCooldownMinutes *int               `json:"alert_cooldown_minutes"`
@@ -157,7 +163,11 @@ func (h *SyncHandler) UpdateTask(c *gin.Context) {
 		utils.BadRequest(c, "请求参数错误: "+err.Error())
 		return
 	}
-	if req.AlertDelaySeconds < 0 {
+	alertDelaySeconds := req.AlertDelaySeconds
+	if req.AlertDelayMS > 0 {
+		alertDelaySeconds = (req.AlertDelayMS + 999) / 1000
+	}
+	if alertDelaySeconds < 0 {
 		utils.BadRequest(c, "预警时间配置不正确")
 		return
 	}
@@ -171,16 +181,10 @@ func (h *SyncHandler) UpdateTask(c *gin.Context) {
 	}
 
 	updates := map[string]interface{}{
-		"alert_delay_seconds": req.AlertDelaySeconds,
-	}
-	if req.AlertStoppedMinutes != nil {
-		updates["alert_stopped_minutes"] = *req.AlertStoppedMinutes
-	}
-	if req.AlertOnError != nil {
-		updates["alert_on_error"] = *req.AlertOnError
-	}
-	if req.AlertCooldownMinutes != nil {
-		updates["alert_cooldown_minutes"] = *req.AlertCooldownMinutes
+		"alert_delay_seconds":    alertDelaySeconds,
+		"alert_stopped_minutes":  0,
+		"alert_on_error":         true,
+		"alert_cooldown_minutes": 0,
 	}
 	if req.AlertChannelID == nil || *req.AlertChannelID == 0 {
 		updates["alert_channel_id"] = nil

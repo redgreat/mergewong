@@ -266,16 +266,11 @@
 
           <div class="wizard-section-title alert-title">
             <h4>预警策略</h4>
-            <div class="help-wrap"><button class="help-button" type="button" aria-label="查看预警策略说明" on:click|stopPropagation={() => toggleHelp("alert")}><CircleHelp size={16} /></button>{#if helpOpen === "alert"}<div class="help-popover">运行延迟表示单次执行持续过久；停止表示计划任务长时间未再次启动；报错预警在执行失败时发送。</div>{/if}</div>
+            <div class="help-wrap"><button class="help-button" type="button" aria-label="查看预警策略说明" on:click|stopPropagation={() => toggleHelp("alert")}><CircleHelp size={16} /></button>{#if helpOpen === "alert"}<div class="help-popover">同步延迟超过阈值后立即预警；若每次提醒前延迟仍未恢复到阈值内，会在 1 小时、3 小时、6 小时后继续提醒。第 6 小时提醒会提示后续不再重复提醒；任务报错默认立即预警。</div>{/if}</div>
           </div>
           <div class="form-grid wizard-grid compact-grid">
             <label>预警发送方<select bind:value={form.alert_channel_id}><option value="">不发送预警</option>{#each alertChannels as channel}<option value={channel.id}>{channel.name}</option>{/each}</select></label>
 			<label>同步延迟阈值（ms）<input type="number" min="0" bind:value={form.alert_delay_ms} placeholder="默认5000" /></label>
-            {#if !editing}
-            <label>停止阈值（分钟）<input type="number" min="0" bind:value={form.alert_stopped_minutes} disabled={form.sync_type === "full"} /></label>
-            <label>重复提醒间隔（分钟）<input type="number" min="1" bind:value={form.alert_cooldown_minutes} /></label>
-            <label class="checkbox-label"><input type="checkbox" bind:checked={form.alert_on_error} />执行报错时立即预警</label>
-            {/if}
           </div>
         {:else}
           <div class="precheck-summary" class:passed={precheckResult?.passed}>

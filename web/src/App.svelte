@@ -88,10 +88,7 @@
     field_mappings: [],
     status: 1,
     alert_channel_id: "",
-    alert_delay_minutes: 0,
-    alert_stopped_minutes: 15,
-    alert_on_error: true,
-    alert_cooldown_minutes: 30
+    alert_delay_ms: 5000
   };
 
   let logs = [];
@@ -414,10 +411,7 @@
       field_mappings: [],
       status: 1,
       alert_channel_id: "",
-      alert_delay_minutes: 0,
-      alert_stopped_minutes: 15,
-      alert_on_error: true,
-      alert_cooldown_minutes: 30
+      alert_delay_ms: 5000
     };
   }
 
@@ -469,10 +463,7 @@
       field_mappings: Object.entries(task.field_mapping || {}).map(([source, target]) => ({ source, target })),
       status: task.status,
       alert_channel_id: task.alert_channel_id || "",
-      alert_delay_minutes: task.alert_delay_minutes || 0,
-      alert_stopped_minutes: task.alert_stopped_minutes || 0,
-      alert_on_error: task.alert_on_error !== false,
-      alert_cooldown_minutes: task.alert_cooldown_minutes || 30
+      alert_delay_ms: (task.alert_delay_seconds || 0) * 1000
     };
   }
 
@@ -507,10 +498,8 @@
         field_mapping: firstFieldMapping,
         status: Number(taskForm.status),
         alert_channel_id: taskForm.alert_channel_id ? Number(taskForm.alert_channel_id) : 0,
-        alert_delay_minutes: Number(taskForm.alert_delay_minutes) || 0,
-        alert_stopped_minutes: Number(taskForm.alert_stopped_minutes) || 0,
-        alert_on_error: !!taskForm.alert_on_error,
-        alert_cooldown_minutes: Number(taskForm.alert_cooldown_minutes) || 30
+        alert_delay_ms: Number(taskForm.alert_delay_ms) || 0,
+        alert_on_error: true
       };
 
 	  payload.tables = tableMappings.map((table) => ({
