@@ -65,6 +65,7 @@ func (h *SyncHandler) CreateTask(c *gin.Context) {
 	if req.AlertDelayMS > 0 {
 		alertDelaySeconds = (req.AlertDelayMS + 999) / 1000
 	}
+	alertChannelID := normalizeAlertChannelID(req.AlertChannelID)
 	task := &models.SyncTask{
 		Name:                 req.Name,
 		SourceDB:             req.SourceDB,
@@ -76,7 +77,7 @@ func (h *SyncHandler) CreateTask(c *gin.Context) {
 		CronExpression:       req.CronExpression,
 		ScheduleType:         req.ScheduleType,
 		IntervalMinutes:      req.IntervalMinutes,
-		AlertChannelID:       req.AlertChannelID,
+		AlertChannelID:       alertChannelID,
 		AlertDelaySeconds:    alertDelaySeconds,
 		AlertStoppedMinutes:  0,
 		AlertOnError:         true,
@@ -173,9 +174,10 @@ func (h *SyncHandler) UpdateTask(c *gin.Context) {
 		utils.BadRequest(c, "预警时间配置不正确")
 		return
 	}
+	alertChannelID := normalizeAlertChannelID(req.AlertChannelID)
 	channelID := uint(0)
-	if req.AlertChannelID != nil {
-		channelID = *req.AlertChannelID
+	if alertChannelID != nil {
+		channelID = *alertChannelID
 	}
 	if err := h.syncService.ValidateAlertChannelID(channelID); err != nil {
 		utils.BadRequest(c, err.Error())
@@ -188,10 +190,10 @@ func (h *SyncHandler) UpdateTask(c *gin.Context) {
 		"alert_on_error":         true,
 		"alert_cooldown_minutes": 0,
 	}
-	if req.AlertChannelID == nil || *req.AlertChannelID == 0 {
+	if alertChannelID == nil {
 		updates["alert_channel_id"] = nil
 	} else {
-		updates["alert_channel_id"] = *req.AlertChannelID
+		updates["alert_channel_id"] = *alertChannelID
 	}
 
 	if err := h.syncService.UpdateTask(uint(id), updates); err != nil {
@@ -223,6 +225,13 @@ func (h *SyncHandler) UpdateTask(c *gin.Context) {
 
 	utils.SuccessWithMessage(c, "更新成功", gin.H{"online_onboarding": running})
 	h.syncService.RecordTaskEvent(updatedTask, "task_updated", "config", "success", "同步任务配置已修改", "", 0, 0)
+}
+
+func normalizeAlertChannelID(id *uint) *uint {
+	if id == nil || *id == 0 {
+		return nil
+	}
+	return id
 }
 
 // DeleteTask 删除任务

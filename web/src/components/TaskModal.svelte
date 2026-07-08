@@ -167,6 +167,8 @@
   function confirmTypeMismatch(item) {
     const table = (form.table_mappings || []).find((mapping) => `${mapping.source_table} → ${mapping.target_table}` === item.object);
     if (!table || !item.confirm_key) return;
+    const confirmed = window.confirm(`确认忽略该校验项吗？\n\n${item.message}\n\n字段类型不一致可能导致同步写入失败、数据截断或目标数据不一致。请确认源端到目标端类型兼容后再继续。`);
+    if (!confirmed) return;
     table.type_mismatch_ignores = [...new Set([...(table.type_mismatch_ignores || []), item.confirm_key])];
     form.table_mappings = [...form.table_mappings];
     onSave();

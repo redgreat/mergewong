@@ -43,4 +43,5 @@ configs/config.yaml
 # Keep generated/private files out with explicit patterns instead of ignoring doc/.
 # Operational scripts are versioned source files.
 web/node_modules
+web/dist
 tmp/

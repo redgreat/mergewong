@@ -15,6 +15,7 @@ const defaultSyncBatchSize = 500
 
 var taskRunLocks sync.Map
 var ErrTaskPaused = errors.New("任务已暂停")
+var mysqlColumnNameCache sync.Map
 
 func acquireTaskRunLock(taskID uint) (func(), error) {
 	value, _ := taskRunLocks.LoadOrStore(taskID, &sync.Mutex{})
@@ -190,13 +191,18 @@ func writeMySQLBatch(db *gorm.DB, mapping *models.SyncTaskTable, sourceColumns [
 }
 
 func writeMySQLBatchTx(db *gorm.DB, mapping *models.SyncTaskTable, sourceColumns []string, batch []map[string]interface{}) error {
-	sourceColumns = syncSourceColumns(mapping, sourceColumns)
-	if len(sourceColumns) == 0 {
+	pairs, err := syncColumnPairs(db, mapping, sourceColumns)
+	if err != nil {
+		return err
+	}
+	if len(pairs) == 0 {
 		return fmt.Errorf("没有可写入的同步字段")
 	}
-	targetColumns := make([]string, len(sourceColumns))
-	for i, column := range sourceColumns {
-		targetColumns[i] = mappedColumn(mapping.FieldMapping, column)
+	sourceColumns = make([]string, len(pairs))
+	targetColumns := make([]string, len(pairs))
+	for i, pair := range pairs {
+		sourceColumns[i] = pair.source
+		targetColumns[i] = pair.target
 	}
 	quoted := make([]string, len(targetColumns))
 	for i, column := range targetColumns {
@@ -226,7 +232,10 @@ func writeMySQLBatchTx(db *gorm.DB, mapping *models.SyncTaskTable, sourceColumns
 		updates = append(updates, q+"=VALUES("+q+")")
 	}
 	query := "INSERT INTO " + quoteMySQL(mapping.TargetTable) + " (" + strings.Join(quoted, ",") + ") VALUES " + strings.Join(placeholders, ",") + " ON DUPLICATE KEY UPDATE " + strings.Join(updates, ",")
-	return db.Exec(query, args...).Error
+	if err := db.Exec(query, args...).Error; err != nil {
+		return fmt.Errorf("%w；写入字段数=%d，批次行数=%d，目标字段=%s，忽略源字段=%s", err, len(targetColumns), len(batch), strings.Join(targetColumns, ","), strings.Join([]string(mapping.IgnoredFields), ","))
+	}
+	return nil
 }
 
 func selectableSourceColumns(task *models.SyncTask, mapping *models.SyncTaskTable, db *gorm.DB) ([]string, error) {
@@ -257,6 +266,49 @@ func selectableSourceColumns(task *models.SyncTask, mapping *models.SyncTaskTabl
 			return nil, fmt.Errorf("同步字段缺少增量游标列 %s", mapping.IncrementalKey)
 		}
 	}
+	return columns, nil
+}
+
+type syncColumnPair struct {
+	source string
+	target string
+}
+
+func syncColumnPairs(db *gorm.DB, mapping *models.SyncTaskTable, sourceColumns []string) ([]syncColumnPair, error) {
+	targetColumns, err := cachedMySQLColumnNames(db, mapping.TargetTable)
+	if err != nil {
+		return nil, fmt.Errorf("读取目标表字段失败: %w", err)
+	}
+	targetSet := map[string]bool{}
+	for _, column := range targetColumns {
+		targetSet[column] = true
+	}
+	pairs := []syncColumnPair{}
+	seenTargets := map[string]string{}
+	for _, source := range syncSourceColumns(mapping, sourceColumns) {
+		target := mappedColumn(mapping.FieldMapping, source)
+		if !targetSet[target] {
+			return nil, fmt.Errorf("目标表缺少字段 %s（源字段 %s）", target, source)
+		}
+		if previous, ok := seenTargets[target]; ok && previous != source {
+			return nil, fmt.Errorf("多个源字段写入同一目标字段 %s: %s, %s", target, previous, source)
+		}
+		seenTargets[target] = source
+		pairs = append(pairs, syncColumnPair{source: source, target: target})
+	}
+	return pairs, nil
+}
+
+func cachedMySQLColumnNames(db *gorm.DB, table string) ([]string, error) {
+	key := fmt.Sprintf("%p:%s", db.Statement.ConnPool, table)
+	if cached, ok := mysqlColumnNameCache.Load(key); ok {
+		return cached.([]string), nil
+	}
+	columns, err := mysqlColumnNamesFromDB(db, table)
+	if err != nil {
+		return nil, err
+	}
+	mysqlColumnNameCache.Store(key, columns)
 	return columns, nil
 }
 
