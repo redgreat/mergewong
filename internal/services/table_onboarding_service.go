@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"fmt"
+	"reflect"
 	"strings"
 	"time"
 
@@ -35,6 +36,9 @@ func (s *SyncService) AddTaskTablesOnline(taskID uint, requested []models.SyncTa
 		}
 		if next.TargetTable != old.TargetTable {
 			return nil, fmt.Errorf("运行中的任务不能修改表 %s 的目标表名，请先暂停任务", name)
+		}
+		if !reflect.DeepEqual(next.FieldMapping, old.FieldMapping) {
+			return nil, fmt.Errorf("运行中的任务不能修改表 %s 的字段映射，请先暂停任务", name)
 		}
 	}
 	file, pos, err := currentMySQLPosition(task.SourceDB)

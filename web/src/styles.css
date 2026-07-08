@@ -373,13 +373,21 @@ button.modal-backdrop:active:not(:disabled) { position: absolute; inset: 0; padd
 .object-row input { width: 15px; height: 15px; }
 .object-empty, .object-error { display: grid; place-items: center; min-height: 180px; padding: 20px; color: var(--text-muted); font-size: 13px; text-align: center; }
 .object-error { color: var(--danger); }
-.selected-table-head, .selected-table-row { display: grid; grid-template-columns: minmax(100px, .85fr) minmax(130px, 1fr) 34px; gap: 10px; align-items: center; padding: 0 12px; }
+.selected-table-head, .selected-table-row { display: grid; grid-template-columns: minmax(100px, .85fr) minmax(130px, 1fr) 34px 34px; gap: 10px; align-items: center; padding: 0 12px; }
 .mode-summary { padding: 14px 16px; color: var(--text-secondary); background: var(--surface-subtle); border: 1px solid var(--border-soft); border-radius: 9px; }
 .selected-table-head { min-height: 36px; color: var(--text-muted); border-bottom: 1px solid var(--border-soft); font-size: 12px; }
-.selected-table-row { min-height: 54px; border-bottom: 1px solid var(--border-soft); }
+.selected-table-item { border-bottom: 1px solid var(--border-soft); }
+.selected-table-row { min-height: 54px; border-bottom: 0; }
 .selected-table-row > span { overflow: hidden; color: var(--text-secondary); font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
 .selected-table-row input { min-width: 0; min-height: 36px; }
 .selected-table-row .icon-button { width: 32px; height: 32px; }
+.field-map-panel { margin: 0 12px 12px; padding: 10px; background: var(--surface); border: 1px solid var(--border-soft); border-radius: 8px; }
+.field-map-add, .field-map-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 32px; align-items: center; gap: 8px; }
+.field-map-add select, .field-map-add input, .field-map-row input { min-width: 0; min-height: 34px; }
+.field-map-row { margin-top: 8px; }
+.field-map-row span { overflow: hidden; color: var(--text-muted); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.field-map-row span::after { content: " ->"; color: var(--text-muted); }
+.field-map-panel .mapping-empty { min-height: auto; padding: 12px 4px 2px; text-align: center; }
 .precheck-summary { padding: 18px; color: var(--danger); background: color-mix(in srgb, var(--danger) 8%, transparent); border: 1px solid color-mix(in srgb, var(--danger) 28%, transparent); border-radius: 10px; }
 .precheck-summary.passed { color: var(--success); background: color-mix(in srgb, var(--success) 8%, transparent); border-color: color-mix(in srgb, var(--success) 28%, transparent); }
 .precheck-list { display: flex; flex-direction: column; gap: 10px; margin-top: 14px; }

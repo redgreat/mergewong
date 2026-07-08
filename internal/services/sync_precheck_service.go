@@ -151,6 +151,19 @@ func (s *SyncService) PrecheckTask(taskID uint) (*PrecheckResult, error) {
 			add("error", object, "源表没有单列主键，无法稳定分页和幂等写入")
 			continue
 		}
+		for sourceName := range mapping.FieldMapping {
+			if !hasColumn(sourceColumns, sourceName) {
+				add("error", object, "字段映射的源字段不存在: "+sourceName)
+			}
+		}
+		mappedTargets := map[string]string{}
+		for _, column := range sourceColumns {
+			targetName := mappedColumn(mapping.FieldMapping, column.Field)
+			if previous, ok := mappedTargets[targetName]; ok && previous != column.Field {
+				add("error", object, fmt.Sprintf("字段映射目标重复: %s 和 %s 都写入 %s", previous, column.Field, targetName))
+			}
+			mappedTargets[targetName] = column.Field
+		}
 		mapping.SourcePrimaryKey, mapping.TargetPrimaryKey = pk, mappedColumn(mapping.FieldMapping, pk)
 		if targetDB.Migrator().HasTable(mapping.TargetTable) {
 			targetColumns, err := describeMySQLTable(targetDB, mapping.TargetTable)

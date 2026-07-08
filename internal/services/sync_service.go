@@ -6,6 +6,7 @@ import (
 	"fmt"
 	stdlog "log"
 	"regexp"
+	"strings"
 	"time"
 
 	"github.com/redgreat/mergewong/internal/database"
@@ -91,7 +92,7 @@ func (s *SyncService) ReplaceTaskTables(taskID uint, tables []models.SyncTaskTab
 		if err := tx.Create(&tables).Error; err != nil {
 			return err
 		}
-		updates := map[string]interface{}{"source_table": tables[0].SourceTable, "target_table": tables[0].TargetTable, "status": 0, "validation_status": "pending", "runtime_status": "pending"}
+		updates := map[string]interface{}{"source_table": tables[0].SourceTable, "target_table": tables[0].TargetTable, "field_mapping": tables[0].FieldMapping, "status": 0, "validation_status": "pending", "runtime_status": "pending"}
 		return tx.Model(&models.SyncTask{}).Where("id = ?", taskID).Updates(updates).Error
 	})
 }
@@ -103,7 +104,10 @@ func validateTaskTables(tables []models.SyncTaskTable) error {
 		return fmt.Errorf("至少选择一张同步表")
 	}
 	sources, targets := map[string]bool{}, map[string]bool{}
-	for _, table := range tables {
+	for i := range tables {
+		table := &tables[i]
+		table.SourceTable = strings.TrimSpace(table.SourceTable)
+		table.TargetTable = strings.TrimSpace(table.TargetTable)
 		if !taskIdentifierPattern.MatchString(table.SourceTable) || !taskIdentifierPattern.MatchString(table.TargetTable) {
 			return fmt.Errorf("表名只能包含字母、数字、下划线和美元符号，且不能以数字开头")
 		}
@@ -114,8 +118,42 @@ func validateTaskTables(tables []models.SyncTaskTable) error {
 			return fmt.Errorf("目标表 %s 重复", table.TargetTable)
 		}
 		sources[table.SourceTable], targets[table.TargetTable] = true, true
+		cleaned, err := normalizeFieldMapping(table.FieldMapping)
+		if err != nil {
+			return fmt.Errorf("表 %s 字段映射不正确: %w", table.SourceTable, err)
+		}
+		table.FieldMapping = cleaned
 	}
 	return nil
+}
+
+func normalizeFieldMapping(mapping models.FieldMapping) (models.FieldMapping, error) {
+	if len(mapping) == 0 {
+		return models.FieldMapping{}, nil
+	}
+	cleaned := models.FieldMapping{}
+	targets := map[string]string{}
+	for source, target := range mapping {
+		source = strings.TrimSpace(source)
+		target = strings.TrimSpace(target)
+		if source == "" && target == "" {
+			continue
+		}
+		if source == "" || target == "" {
+			return nil, fmt.Errorf("源字段和目标字段必须同时填写")
+		}
+		if !taskIdentifierPattern.MatchString(source) || !taskIdentifierPattern.MatchString(target) {
+			return nil, fmt.Errorf("字段名只能包含字母、数字、下划线和美元符号，且不能以数字开头")
+		}
+		if previous, ok := targets[target]; ok && previous != source {
+			return nil, fmt.Errorf("目标字段 %s 被多个源字段映射", target)
+		}
+		if source != target {
+			cleaned[source] = target
+			targets[target] = source
+		}
+	}
+	return cleaned, nil
 }
 
 func (s *SyncService) ValidateTaskConnections(sourceName, targetName string) error {

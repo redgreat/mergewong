@@ -1,5 +1,5 @@
 <script>
-  import { Check, CircleHelp, Search, X } from "lucide-svelte";
+  import { Check, ChevronDown, CircleHelp, Plus, Search, Trash2, X } from "lucide-svelte";
   import { request } from "../api.js";
 
   export let open = false;
@@ -20,7 +20,12 @@
   let loadedConnection = "";
   let loadingTables = false;
   let tableError = "";
-  $: if (!open) { step = 1; helpOpen = ""; }
+  let expandedMappingTable = "";
+  let columnCache = {};
+  let columnLoading = {};
+  let columnErrors = {};
+  let errors = {};
+  $: if (!open) { step = 1; helpOpen = ""; errors = {}; expandedMappingTable = ""; columnCache = {}; columnLoading = {}; columnErrors = {}; }
   $: if (open && precheckResult) step = 4;
   $: stepOneReady = !!(form.name?.trim() && form.source_db && form.target_db);
   $: stepTwoReady = !!form.table_mappings?.length && form.table_mappings.every((table) => table.source_table?.trim() && table.target_table?.trim());
@@ -63,6 +68,73 @@
     helpOpen = helpOpen === name ? "" : name;
   }
 
+  function schemaKey(connection, table) {
+    return `${connection}::${table}`;
+  }
+
+  function sourceColumns(table) {
+    return columnCache[schemaKey(form.source_db, table.source_table)] || [];
+  }
+
+  async function loadColumns(connection, tableName) {
+    if (!connection || !tableName) return [];
+    const key = schemaKey(connection, tableName);
+    if (columnCache[key]) return columnCache[key];
+    columnLoading = { ...columnLoading, [key]: true };
+    columnErrors = { ...columnErrors, [key]: "" };
+    try {
+      const schema = await request(`/api/db/${encodeURIComponent(connection)}/table/${encodeURIComponent(tableName)}/schema`, { token });
+      const columns = (schema || []).map((column) => column.Field || column.field || column.COLUMN_NAME || column.column_name).filter(Boolean);
+      columnCache = { ...columnCache, [key]: columns };
+      return columns;
+    } catch (error) {
+      columnErrors = { ...columnErrors, [key]: error.message };
+      return [];
+    } finally {
+      columnLoading = { ...columnLoading, [key]: false };
+    }
+  }
+
+  async function toggleMappingPanel(table) {
+    expandedMappingTable = expandedMappingTable === table.source_table ? "" : table.source_table;
+    if (expandedMappingTable) {
+      await loadColumns(form.source_db, table.source_table);
+    }
+  }
+
+  function mappingEntries(table) {
+    return Object.entries(table.field_mapping || {});
+  }
+
+  function updateMappingTarget(table, source, target) {
+    table.field_mapping = { ...(table.field_mapping || {}), [source]: target };
+    form.table_mappings = [...form.table_mappings];
+  }
+
+  function removeFieldMapping(table, source) {
+    const next = { ...(table.field_mapping || {}) };
+    delete next[source];
+    table.field_mapping = next;
+    form.table_mappings = [...form.table_mappings];
+  }
+
+  function chooseMappingSource(table, event) {
+    const source = event.currentTarget.value;
+    table.new_mapping_source = source;
+    table.new_mapping_target = source;
+    form.table_mappings = [...form.table_mappings];
+  }
+
+  function addFieldMapping(table) {
+    const source = table.new_mapping_source;
+    const target = (table.new_mapping_target || source || "").trim();
+    if (!source || !target) return;
+    table.field_mapping = { ...(table.field_mapping || {}), [source]: target };
+    table.new_mapping_source = "";
+    table.new_mapping_target = "";
+    form.table_mappings = [...form.table_mappings];
+  }
+
   function changeSourceDB(event) {
     const nextSource = event.currentTarget.value;
     if (nextSource !== form.source_db) {
@@ -77,6 +149,29 @@
     if (event.key !== "Escape" || !open) return;
     if (helpOpen) helpOpen = "";
     else onClose();
+  }
+
+  function validateStep(currentStep) {
+    errors = {};
+    if (currentStep === 1) {
+      if (!form.name?.trim()) errors.name = "请填写任务名称";
+      if (!form.source_db) errors.source_db = "请选择源库连接";
+      if (!form.target_db) errors.target_db = "请选择目标库连接";
+    }
+    if (currentStep === 2) {
+      if (!form.table_mappings?.length) errors.tables = "请至少选择一张同步表";
+    }
+    return Object.keys(errors).length === 0;
+  }
+
+  function nextStep() {
+    if (!validateStep(step)) return;
+    step += 1;
+  }
+
+  function handleSave() {
+    if (!validateStep(1) || !validateStep(2)) return;
+    onSave();
   }
 </script>
 
@@ -101,9 +196,9 @@
       <div class="wizard-body">
         {#if step === 1}
           <div class="form-grid wizard-grid">
-            <label class="full">任务名称<input type="text" bind:value={form.name} placeholder="例如：订单数据同步" disabled={editing} /></label>
-            <label>源库连接<select value={form.source_db} on:change={changeSourceDB} disabled={editing}><option value="">请选择源端连接</option>{#each connections.filter((connection) => connection.usage === "source" || connection.usage === "both" || !connection.usage) as connection}<option value={connection.name}>{connection.name}</option>{/each}</select></label>
-            <label>目标库连接<select bind:value={form.target_db} disabled={editing}><option value="">请选择目标端连接</option>{#each connections.filter((connection) => connection.usage === "target" || connection.usage === "both" || !connection.usage) as connection}<option value={connection.name}>{connection.name}</option>{/each}</select></label>
+            <label class="full">任务名称<input type="text" bind:value={form.name} placeholder="例如：订单数据同步" disabled={editing} />{#if errors.name}<span class="field-error">{errors.name}</span>{/if}</label>
+            <label>源库连接<select value={form.source_db} on:change={changeSourceDB} disabled={editing}><option value="">请选择源端连接</option>{#each connections.filter((connection) => connection.usage === "source" || connection.usage === "both" || !connection.usage) as connection}<option value={connection.name}>{connection.name}</option>{/each}</select>{#if errors.source_db}<span class="field-error">{errors.source_db}</span>{/if}</label>
+            <label>目标库连接<select bind:value={form.target_db} disabled={editing}><option value="">请选择目标端连接</option>{#each connections.filter((connection) => connection.usage === "target" || connection.usage === "both" || !connection.usage) as connection}<option value={connection.name}>{connection.name}</option>{/each}</select>{#if errors.target_db}<span class="field-error">{errors.target_db}</span>{/if}</label>
             <label>同步类型<select bind:value={form.sync_type} disabled={editing}><option value="full_cdc">全量初始化 + Binlog CDC</option><option value="cdc">仅 Binlog CDC</option><option value="full">仅全量初始化</option></select></label>
           </div>
         {:else if step === 2}
@@ -120,10 +215,45 @@
             </section>
             <section class="object-panel selected-panel">
               <div class="object-panel-header"><strong>已选同步对象</strong><span>{form.table_mappings?.length || 0} 张表</span></div>
-              <div class="selected-table-head"><span>源表</span><span>目标表名</span><span></span></div>
+              <div class="selected-table-head"><span>源表</span><span>目标表名</span><span></span><span></span></div>
               <div class="selected-table-list">
-                {#if !(form.table_mappings || []).length}<div class="object-empty">从左侧选择需要同步的表</div>
-                {:else}{#each form.table_mappings as table}<div class="selected-table-row"><span title={table.source_table}>{table.source_table}</span><input aria-label={`${table.source_table} 的目标表名`} bind:value={table.target_table} /><button type="button" class="icon-button" aria-label={`移除 ${table.source_table}`} on:click={() => removeTable(table.source_table)}><X size={15} /></button></div>{/each}{/if}
+                {#if !(form.table_mappings || []).length}<div class="object-empty">{errors.tables || "从左侧选择需要同步的表"}</div>
+                {:else}{#each form.table_mappings as table}<div class="selected-table-item">
+                  <div class="selected-table-row">
+                    <span title={table.source_table}>{table.source_table}</span>
+                    <input aria-label={`${table.source_table} 的目标表名`} bind:value={table.target_table} />
+                    <button type="button" class="icon-button" aria-label={`${table.source_table} 字段映射`} on:click={() => toggleMappingPanel(table)}><ChevronDown size={15} class={expandedMappingTable === table.source_table ? "rotated" : ""} /></button>
+                    <button type="button" class="icon-button" aria-label={`移除 ${table.source_table}`} on:click={() => removeTable(table.source_table)}><X size={15} /></button>
+                  </div>
+                  {#if expandedMappingTable === table.source_table}
+                    <div class="field-map-panel">
+                      {#if columnLoading[schemaKey(form.source_db, table.source_table)]}<div class="mapping-empty">正在读取字段清单...</div>
+                      {:else if columnErrors[schemaKey(form.source_db, table.source_table)]}<div class="object-error">{columnErrors[schemaKey(form.source_db, table.source_table)]}</div>
+                      {:else}
+                        <div class="field-map-add">
+                          <select aria-label={`${table.source_table} 的源字段`} value={table.new_mapping_source || ""} on:change={(event) => chooseMappingSource(table, event)}>
+                            <option value="">选择源字段</option>
+                            {#each sourceColumns(table).filter((column) => !(table.field_mapping || {})[column]) as column}<option value={column}>{column}</option>{/each}
+                          </select>
+                          <input aria-label={`${table.source_table} 的目标字段`} bind:value={table.new_mapping_target} placeholder="目标字段名" />
+                          <button type="button" class="icon-button" aria-label="添加字段映射" disabled={!table.new_mapping_source} on:click={() => addFieldMapping(table)}><Plus size={15} /></button>
+                        </div>
+                        {#if mappingEntries(table).length === 0}<div class="mapping-empty">未配置字段改名，同名字段按原名同步</div>
+                        {:else}
+                          <div class="field-map-list">
+                            {#each mappingEntries(table) as [source, target]}
+                              <div class="field-map-row">
+                                <span title={source}>{source}</span>
+                                <input aria-label={`${source} 的目标字段名`} value={target} on:input={(event) => updateMappingTarget(table, source, event.currentTarget.value)} />
+                                <button type="button" class="icon-button" aria-label={`移除字段映射 ${source}`} on:click={() => removeFieldMapping(table, source)}><Trash2 size={14} /></button>
+                              </div>
+                            {/each}
+                          </div>
+                        {/if}
+                      {/if}
+                    </div>
+                  {/if}
+                </div>{/each}{/if}
               </div>
             </section>
           </div>
@@ -163,9 +293,18 @@
         <button class="ghost" type="button" on:click={onClose}>取消</button>
         <div>
           {#if step > 1 && step < 4}<button class="ghost" type="button" on:click={() => (step -= 1)}>上一步</button>{/if}
-          {#if step < 3}<button type="button" disabled={(step === 1 && !stepOneReady) || (step === 2 && !stepTwoReady)} on:click={() => (step += 1)}>下一步</button>{:else if step === 3}<button disabled={saving} on:click={onSave}>{saving ? "正在预检查…" : "保存并预检查"}</button>{:else}<button on:click={onClose}>完成</button>{/if}
+          {#if step < 3}<button type="button" disabled={(step === 1 && !stepOneReady) || (step === 2 && !stepTwoReady)} on:click={nextStep}>下一步</button>{:else if step === 3}<button disabled={saving} on:click={handleSave}>{saving ? "正在预检查…" : "保存并预检查"}</button>{:else}<button on:click={onClose}>完成</button>{/if}
         </div>
       </div>
     </div>
   </div>
 {/if}
+
+<style>
+  .field-error {
+    display: block;
+    margin-top: 4px;
+    color: var(--danger);
+    font-size: 12px;
+  }
+</style>

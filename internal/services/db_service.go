@@ -2,6 +2,7 @@ package services
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/redgreat/mergewong/internal/database"
 )
@@ -129,8 +130,11 @@ func (s *DBService) GetTableSchema(dbName, tableName string) ([]map[string]inter
 		return nil, err
 	}
 
+	if !validMySQLIdentifier(tableName) {
+		return nil, fmt.Errorf("非法表名")
+	}
 	var schema []map[string]interface{}
-	sql := fmt.Sprintf("DESCRIBE %s", tableName)
+	sql := fmt.Sprintf("DESCRIBE %s", quoteIdentifier(db.Dialector.Name(), tableName))
 
 	rows, err := db.Raw(sql).Rows()
 	if err != nil {
@@ -172,6 +176,19 @@ func (s *DBService) GetTableSchema(dbName, tableName string) ([]map[string]inter
 	}
 
 	return schema, nil
+}
+
+func quoteIdentifier(dialect, identifier string) string {
+	switch dialect {
+	case "mysql":
+		return "`" + strings.ReplaceAll(identifier, "`", "``") + "`"
+	case "postgres":
+		return `"` + strings.ReplaceAll(identifier, `"`, `""`) + `"`
+	case "sqlserver":
+		return "[" + strings.ReplaceAll(identifier, "]", "]]") + "]"
+	default:
+		return identifier
+	}
 }
 
 // InsertData 插入数据

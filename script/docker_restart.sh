@@ -13,7 +13,7 @@ docker compose rm -f mergewong
 
 echo "➤ 2. 删除本地所有的 mergewong 镜像记录..."
 # 注意：这会查找带有 mergewong 名称的镜像，并按 ID 强制删除
-docker images | grep 'mergewong' | awk '{print $3}' | xargs -r docker rmi -f
+docker images | grep 'mergewong' | awk '{print $2}' | xargs -r docker rmi -f
 
 echo "➤ 3. 清理所有旧的日志数据..."
 # 删除根目录下 ./log/ 内的所有文件及文件夹

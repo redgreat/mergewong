@@ -479,14 +479,20 @@
   async function saveTask() {
     try {
       savingTask = true;
-      const fieldMapping = {};
-      for (const row of taskForm.field_mappings || []) {
-        const source = row.source.trim();
-        const target = row.target.trim();
-        if (!source && !target) continue;
-        if (!source || !target) throw new Error("字段映射的源字段和目标字段必须同时填写");
-        fieldMapping[source] = target;
-      }
+      const normalizeFieldMapping = (mapping = {}) => {
+        const fieldMapping = {};
+        for (const [rawSource, rawTarget] of Object.entries(mapping || {})) {
+          const source = String(rawSource || "").trim();
+          const target = String(rawTarget || "").trim();
+          if (!source && !target) continue;
+          if (!source || !target) throw new Error("字段映射的源字段和目标字段必须同时填写");
+          if (source !== target) fieldMapping[source] = target;
+        }
+        return fieldMapping;
+      };
+      const tableMappings = taskForm.table_mappings || [];
+      if (!tableMappings.length) throw new Error("请至少选择一张同步表");
+      const firstFieldMapping = normalizeFieldMapping(tableMappings[0].field_mapping);
 
       const payload = {
         name: taskForm.name.trim(),
@@ -498,7 +504,7 @@
 	    schedule_type: "manual",
         interval_minutes: Number(taskForm.interval_minutes) || 0,
         cron_expression: taskForm.cron_expression.trim(),
-        field_mapping: fieldMapping,
+        field_mapping: firstFieldMapping,
         status: Number(taskForm.status),
         alert_channel_id: taskForm.alert_channel_id ? Number(taskForm.alert_channel_id) : 0,
         alert_delay_minutes: Number(taskForm.alert_delay_minutes) || 0,
@@ -507,12 +513,10 @@
         alert_cooldown_minutes: Number(taskForm.alert_cooldown_minutes) || 30
       };
 
-	  const tableMappings = taskForm.table_mappings || [];
-	  if (!tableMappings.length) throw new Error("请至少选择一张同步表");
 	  payload.tables = tableMappings.map((table) => ({
 	    source_table: table.source_table.trim(),
 	    target_table: table.target_table.trim(),
-	    field_mapping: table.field_mapping || {}
+	    field_mapping: normalizeFieldMapping(table.field_mapping)
 	  }));
 	  payload.source_table = payload.tables[0].source_table;
 	  payload.target_table = payload.tables[0].target_table;
