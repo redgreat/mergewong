@@ -563,9 +563,18 @@ func parseXAPrepareEvent(raw []byte) (string, bool, error) {
 	onePhase := body[0] != 0
 	formatID := binary.LittleEndian.Uint32(body[1:5])
 	gtridLen := int(binary.LittleEndian.Uint32(body[5:9]))
-	bqualLen := int(body[9])
-	total := 10 + gtridLen + bqualLen
-	if len(body) < total {
+	if len(body) >= 13 {
+		bqualLen32 := int(binary.LittleEndian.Uint32(body[9:13]))
+		total := 13 + gtridLen + bqualLen32
+		if total > 13 && len(body) >= total {
+			gtrid := body[13 : 13+gtridLen]
+			bqual := body[13+gtridLen : total]
+			return xaKey(formatID, gtrid, bqual), onePhase, nil
+		}
+	}
+	bqualLen8 := int(body[9])
+	total := 10 + gtridLen + bqualLen8
+	if total <= 10 || len(body) < total {
 		return "", false, fmt.Errorf("XA PREPARE XID 长度异常")
 	}
 	gtrid := body[10 : 10+gtridLen]
