@@ -351,18 +351,37 @@ func (m *CDCManager) stream(ctx context.Context, task *models.SyncTask, source *
 			query := strings.ToUpper(rawQuery)
 			if action, xidKey, ok := parseXAQuery(rawQuery); ok {
 				applied := int64(0)
-				if action == "commit" {
+				switch action {
+				case "prepare":
+					if err := m.saveXAPrepared(task.ID, xidKey, currentFile, event.Header.LogPos, operations); err != nil {
+						return err
+					}
+					operations = operations[:0]
+				case "commit":
 					prepared, err := m.loadXAPreparedOperations(task, xidKey)
 					if err != nil {
-						return err
+						if len(operations) == 0 {
+							m.service.RecordTaskEvent(task, "xa_commit_without_prepare", "cdc", "warning", "XA COMMIT 未找到 prepared 缓存", fmt.Sprintf("xid=%s；按空事务跳过", xidKey), 0, 0)
+						} else {
+							applied = int64(len(operations))
+							if err := applyCDCTransaction(targetDB, operations); err != nil {
+								return err
+							}
+							operations = operations[:0]
+						}
+					} else {
+						applied = int64(len(prepared))
+						if err := applyCDCTransaction(targetDB, prepared); err != nil {
+							return err
+						}
 					}
-					applied = int64(len(prepared))
-					if err := applyCDCTransaction(targetDB, prepared); err != nil {
-						return err
-					}
+				case "rollback":
+					operations = operations[:0]
 				}
-				if err := m.deleteXAPrepared(task.ID, xidKey); err != nil {
-					return err
+				if action != "prepare" {
+					if err := m.deleteXAPrepared(task.ID, xidKey); err != nil {
+						return err
+					}
 				}
 				sessionRows += applied
 				if err := m.advanceCheckpoint(task, checkpoint, currentFile, event.Header.LogPos, sessionRows, streamStarted, event.Header.Timestamp, &lastMetricsUpdate); err != nil {
@@ -455,6 +474,8 @@ func parseXAQuery(query string) (string, string, bool) {
 	action := ""
 	rest := ""
 	switch {
+	case strings.HasPrefix(upper, "XA PREPARE "):
+		action, rest = "prepare", strings.TrimSpace(query[len("XA PREPARE "):])
 	case strings.HasPrefix(upper, "XA COMMIT "):
 		action, rest = "commit", strings.TrimSpace(query[len("XA COMMIT "):])
 	case strings.HasPrefix(upper, "XA ROLLBACK "):
@@ -544,6 +565,12 @@ func xaKey(formatID uint32, gtrid, bqual []byte) string {
 }
 
 func (m *CDCManager) saveXAPrepared(taskID uint, xidKey, file string, pos uint32, operations []cdcOperation) error {
+	if len(operations) == 0 {
+		var existing models.SyncXAPreparedTransaction
+		if err := m.loadXAPreparedRecord(taskID, xidKey, &existing); err == nil {
+			return nil
+		}
+	}
 	records := make([]cdcOperationRecord, 0, len(operations))
 	for _, op := range operations {
 		values := make([]interface{}, len(op.values))
@@ -562,7 +589,7 @@ func (m *CDCManager) saveXAPrepared(taskID uint, xidKey, file string, pos uint32
 
 func (m *CDCManager) loadXAPreparedOperations(task *models.SyncTask, xidKey string) ([]cdcOperation, error) {
 	var prepared models.SyncXAPreparedTransaction
-	if err := m.service.systemDB.Where("task_id = ? AND xid_key = ?", task.ID, xidKey).First(&prepared).Error; err != nil {
+	if err := m.loadXAPreparedRecord(task.ID, xidKey, &prepared); err != nil {
 		return nil, fmt.Errorf("XA prepared 事务不存在: %s", xidKey)
 	}
 	var records []cdcOperationRecord
@@ -584,8 +611,35 @@ func (m *CDCManager) loadXAPreparedOperations(task *models.SyncTask, xidKey stri
 	return operations, nil
 }
 
+func (m *CDCManager) loadXAPreparedRecord(taskID uint, xidKey string, prepared *models.SyncXAPreparedTransaction) error {
+	err := m.service.systemDB.Where("task_id = ? AND xid_key = ?", taskID, xidKey).First(prepared).Error
+	if err == nil {
+		return nil
+	}
+	if err != gorm.ErrRecordNotFound {
+		return err
+	}
+	suffix, ok := xaKeySuffix(xidKey)
+	if !ok {
+		return err
+	}
+	return m.service.systemDB.Where("task_id = ? AND xid_key LIKE ?", taskID, "%:"+suffix).Order("id DESC").First(prepared).Error
+}
+
 func (m *CDCManager) deleteXAPrepared(taskID uint, xidKey string) error {
-	return m.service.systemDB.Where("task_id = ? AND xid_key = ?", taskID, xidKey).Delete(&models.SyncXAPreparedTransaction{}).Error
+	query := m.service.systemDB.Where("task_id = ? AND xid_key = ?", taskID, xidKey)
+	if suffix, ok := xaKeySuffix(xidKey); ok {
+		query = m.service.systemDB.Where("task_id = ? AND (xid_key = ? OR xid_key LIKE ?)", taskID, xidKey, "%:"+suffix)
+	}
+	return query.Delete(&models.SyncXAPreparedTransaction{}).Error
+}
+
+func xaKeySuffix(xidKey string) (string, bool) {
+	parts := strings.SplitN(xidKey, ":", 2)
+	if len(parts) != 2 || parts[1] == "" {
+		return "", false
+	}
+	return parts[1], true
 }
 
 func applyCDCTransaction(db *gorm.DB, operations []cdcOperation) error {
