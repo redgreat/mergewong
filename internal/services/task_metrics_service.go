@@ -38,25 +38,34 @@ func (s *SyncService) RecordCDCMetricSnapshot(task *models.SyncTask, now time.Ti
 	if task == nil || lastLog == nil || lastRows == nil || lastOps == nil {
 		return nil
 	}
-	if !lastLog.IsZero() && now.Sub(*lastLog) < taskMetricInterval {
-		return nil
-	}
 	deltaRows := sessionRows - *lastRows
 	deltaOps := cdcOperationMetrics{
 		Insert: currentOps.Insert - lastOps.Insert,
 		Update: currentOps.Update - lastOps.Update,
 		Delete: currentOps.Delete - lastOps.Delete,
 	}
+	if !lastLog.IsZero() && now.Sub(*lastLog) < taskMetricInterval && deltaRows <= 0 {
+		return nil
+	}
 	if deltaRows <= 0 && delay <= 0 {
 		return nil
+	}
+	insertRows := maxInt64(deltaOps.Insert, 0)
+	updateRows := maxInt64(deltaOps.Update, 0)
+	deleteRows := maxInt64(deltaOps.Delete, 0)
+	totalRows := maxInt64(deltaRows, 0)
+	readRows := totalRows - insertRows - updateRows - deleteRows
+	if readRows < 0 {
+		readRows = 0
 	}
 	detail := cdcMetricLogDetail{
 		DelaySeconds:  delay,
 		RowsPerSecond: speed,
-		InsertRows:    maxInt64(deltaOps.Insert, 0),
-		UpdateRows:    maxInt64(deltaOps.Update, 0),
-		DeleteRows:    maxInt64(deltaOps.Delete, 0),
-		TotalRows:     sessionRows,
+		InsertRows:    insertRows,
+		UpdateRows:    updateRows,
+		DeleteRows:    deleteRows,
+		ReadRows:      readRows,
+		TotalRows:     totalRows,
 	}
 	bytes, _ := json.Marshal(detail)
 	log := models.SyncLog{
@@ -119,12 +128,15 @@ func (s *SyncService) GetTaskMetricHistory(taskID uint, from, to time.Time) ([]T
 		if log.EventType == taskMetricEventType {
 			var detail cdcMetricLogDetail
 			_ = json.Unmarshal([]byte(log.Detail), &detail)
-			point.DelaySeconds = detail.DelaySeconds
+			if detail.DelaySeconds > point.DelaySeconds {
+				point.DelaySeconds = detail.DelaySeconds
+			}
 			point.RowsPerSecond = detail.RowsPerSecond
+			point.ReadRows += detail.ReadRows
 			point.InsertRows += detail.InsertRows
 			point.UpdateRows += detail.UpdateRows
 			point.DeleteRows += detail.DeleteRows
-			point.TotalRows = detail.TotalRows
+			point.TotalRows += detail.TotalRows
 			continue
 		}
 		point.ReadRows += log.RowsAffected

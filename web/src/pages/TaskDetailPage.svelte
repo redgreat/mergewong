@@ -13,6 +13,12 @@
   const jobTypeText = (type) => ({ compare:"全量对比", repair:"补数" }[type] || type);
   const diffTypeText = (type) => ({ missing_target:"目标缺少", missing_source:"源端缺少", mismatch:"字段不一致" }[type] || type || "-");
   const delayText = (seconds=0) => `${(seconds * 1000).toLocaleString()} ms`;
+  const chartLeft = 46;
+  const chartRight = 576;
+  const chartTop = 20;
+  const chartBottom = 126;
+  const chartHeight = chartBottom - chartTop;
+  const chartWidth = chartRight - chartLeft;
   let repairJobs = [];
   let repairDiffs = [];
   let repairError = "";
@@ -25,6 +31,9 @@
   let metricError = "";
   let metricFrom = "";
   let metricTo = "";
+  let metricRange = "24h";
+  let activeDelayIndex = null;
+  let activeRowsIndex = null;
   let loadedMetricTaskId = 0;
   let cutoffColumn = "LastUpdateTime";
   let cutoffTime = "";
@@ -32,14 +41,20 @@
   let cutoffColumnError = "";
   let loadedCutoffTaskId = 0;
   let repairBusy = false;
+  let detailRefreshing = false;
 	$: snapshotTotal = (task.task_tables || []).reduce((sum, table) => sum + Number(table.snapshot_total || 0), 0);
 	$: snapshotProcessed = (task.task_tables || []).reduce((sum, table) => sum + Number(table.snapshot_processed || 0), 0);
 	$: overallPercent = snapshotTotal > 0 ? Math.min(100, snapshotProcessed * 100 / snapshotTotal) : ((task.task_tables || []).every((table) => table.sync_state === "active") ? 100 : 0);
   $: runningJob = repairJobs.find((job) => job.status === "running" || job.status === "canceling");
   $: diffTotalPages = Math.max(1, Math.ceil(diffTotal / diffPageSize));
   $: maxDelay = Math.max(1, ...metricPoints.map((point) => Number(point.delay_seconds || 0)));
-  $: maxRows = Math.max(1, ...metricPoints.map((point) => metricRowTotal(point)));
+  $: maxRows = Math.max(1, ...metricPoints.map((point) => Number(point.total_rows || metricRowTotal(point))));
   $: delayPolyline = metricPoints.map((point, index) => `${chartX(index)},${chartY(Number(point.delay_seconds || 0), maxDelay)}`).join(" ");
+  $: delayTicks = buildTicks(maxDelay, delayText);
+  $: rowTicks = buildTicks(maxRows, (value) => `${compactNumber(value)} 行`);
+  $: xAxisLabels = buildXAxisLabels(metricPoints);
+  $: delayPoint = metricPoints[resolveActiveIndex(activeDelayIndex)] || null;
+  $: rowsPoint = metricPoints[resolveActiveIndex(activeRowsIndex)] || null;
   $: if (task.id && token && loadedMetricTaskId !== task.id) {
     loadedMetricTaskId = task.id;
     setMetricRange("24h", false);
@@ -60,6 +75,7 @@
     return normalized.length === 16 ? `${normalized}:00` : normalized;
   }
   function setMetricRange(range, refresh = true) {
+    metricRange = range;
     const now = new Date();
     const from = new Date(now);
     if (range === "7d") from.setDate(from.getDate() - 7);
@@ -73,21 +89,40 @@
     if (!task.id || !token) return;
     try {
       metricPoints = await request(`/api/sync/tasks/${task.id}/metrics`, { token, params: { from: normalizeCutoffTime(metricFrom), to: normalizeCutoffTime(metricTo) } });
+      activeDelayIndex = metricPoints.length > 0 ? metricPoints.length - 1 : null;
+      activeRowsIndex = metricPoints.length > 0 ? metricPoints.length - 1 : null;
       metricError = "";
     } catch (err) {
       metricError = err.message;
       metricPoints = [];
+      activeDelayIndex = null;
+      activeRowsIndex = null;
     }
   }
   function chartX(index) {
-    if (metricPoints.length <= 1) return 24;
-    return 24 + (index * 552) / (metricPoints.length - 1);
+    if (metricPoints.length <= 1) return chartLeft + chartWidth / 2;
+    return chartLeft + (index * chartWidth) / (metricPoints.length - 1);
   }
   function chartY(value, max) {
-    return 138 - (Number(value || 0) * 108) / max;
+    return chartBottom - (Number(value || 0) * chartHeight) / Math.max(1, Number(max || 0));
   }
   function metricRowTotal(point) {
     return Number(point.insert_rows || 0) + Number(point.update_rows || 0) + Number(point.delete_rows || 0) + Number(point.read_rows || 0);
+  }
+  function buildTicks(maxValue, formatter) {
+    const max = Math.max(1, Number(maxValue || 0));
+    const values = [max, Math.ceil(max / 2), 0];
+    return [...new Set(values)].sort((a, b) => b - a).map((value) => ({ value, label: formatter(value) }));
+  }
+  function buildXAxisLabels(points) {
+    if (!points?.length) return [];
+    const candidates = [0, Math.floor((points.length - 1) / 2), points.length - 1];
+    return [...new Set(candidates)].map((index) => ({ index, label: metricAxisTime(points[index]?.time) }));
+  }
+  function metricAxisTime(value) {
+    if (!value) return "-";
+    const date = new Date(value);
+    return `${String(date.getMonth() + 1).padStart(2, "0")}/${String(date.getDate()).padStart(2, "0")} ${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
   }
   function metricTime(value) {
     return value ? new Date(value).toLocaleString() : "-";
@@ -97,6 +132,38 @@
     if (num >= 1000000) return `${(num / 1000000).toFixed(1)}m`;
     if (num >= 1000) return `${(num / 1000).toFixed(1)}k`;
     return String(num);
+  }
+  function barWidth() {
+    if (metricPoints.length <= 1) return 14;
+    return Math.max(8, Math.min(18, chartWidth / Math.max(6, metricPoints.length * 2.6)));
+  }
+  function hitWidth() {
+    if (metricPoints.length <= 1) return chartWidth;
+    return Math.max(18, chartWidth / metricPoints.length);
+  }
+  function resolveActiveIndex(index) {
+    if (metricPoints.length === 0) return -1;
+    if (index === null || index === undefined) return metricPoints.length - 1;
+    return Math.max(0, Math.min(metricPoints.length - 1, index));
+  }
+  function selectDelayPoint(index) {
+    activeDelayIndex = index;
+  }
+  function selectRowsPoint(index) {
+    activeRowsIndex = index;
+  }
+  async function refreshDetail(refreshMetrics = true) {
+    if (detailRefreshing) return;
+    detailRefreshing = true;
+    try {
+      await Promise.all([
+        Promise.resolve(onRefresh()),
+        loadRepairJobs(),
+        refreshMetrics ? loadMetrics() : Promise.resolve()
+      ]);
+    } finally {
+      detailRefreshing = false;
+    }
   }
   const columnName = (column) => column.Field || column.field || column.COLUMN_NAME || column.column_name || "";
   const columnType = (column) => column.Type || column.type || column.DATA_TYPE || column.data_type || "";
@@ -186,13 +253,16 @@
     loadRepairJobs();
     loadMetrics();
     let ticks = 0;
-    const timer = setInterval(() => { onRefresh(); loadRepairJobs(); ticks += 1; if (ticks % 15 === 0) loadMetrics(); }, 2000);
+    const timer = setInterval(() => {
+      ticks += 1;
+      refreshDetail(ticks % 5 === 0);
+    }, 2000);
     return () => clearInterval(timer);
   });
 </script>
 
 <section class="task-detail-page">
-  <div class="detail-heading"><div><button class="ghost icon-text" on:click={onBack}><ArrowLeft size={16}/>返回任务</button><h2>{task.name}</h2><p>{task.source_db} → {task.target_db}</p></div><button class="ghost icon-text" on:click={onRefresh}><RefreshCw size={15}/>刷新</button></div>
+  <div class="detail-heading"><div><button class="ghost icon-text" on:click={onBack}><ArrowLeft size={16}/>返回任务</button><h2>{task.name}</h2><p>{task.source_db} → {task.target_db}</p></div><button class="ghost icon-text" on:click={() => refreshDetail(true)}><RefreshCw size={15}/>刷新</button></div>
   <div class="metric-grid">
     <div class="metric-card"><span><Workflow size={16}/>运行状态</span><strong>{runtimeText(task.runtime_status)}</strong><small>{task.last_run_message || "-"}</small></div>
     <div class="metric-card"><span><Gauge size={16}/>同步延迟</span><strong>{delayText(task.delay_seconds)}</strong><small>{(task.rows_per_second || 0).toFixed(1)} 行/秒</small></div>
@@ -203,9 +273,9 @@
     <div class="card-header">
       <div><h2>运行趋势</h2><p>保留最近 30 天的同步延迟、读取和增改删行数。</p></div>
       <div class="header-actions metric-range-actions">
-        <button class="ghost" on:click={() => setMetricRange("24h")}>24小时</button>
-        <button class="ghost" on:click={() => setMetricRange("7d")}>7天</button>
-        <button class="ghost" on:click={() => setMetricRange("30d")}>30天</button>
+        <button class:active-filter={metricRange === "24h"} class="ghost" on:click={() => setMetricRange("24h")}>24小时</button>
+        <button class:active-filter={metricRange === "7d"} class="ghost" on:click={() => setMetricRange("7d")}>7天</button>
+        <button class:active-filter={metricRange === "30d"} class="ghost" on:click={() => setMetricRange("30d")}>30天</button>
         <button class="ghost icon-text" on:click={loadMetrics}><RefreshCw size={15}/>查询</button>
       </div>
     </div>
@@ -220,29 +290,55 @@
       <div class="trend-grid">
         <div class="trend-card">
           <div class="trend-card-head"><strong>同步延迟</strong><span>峰值 {delayText(maxDelay)}</span></div>
+          {#if delayPoint}
+            <div class="trend-inspector"><span>{metricTime(delayPoint.time)}</span><span>延迟 {delayText(delayPoint.delay_seconds)}</span><span>速率 {(Number(delayPoint.rows_per_second || 0)).toFixed(1)} 行/秒</span></div>
+          {/if}
           <svg viewBox="0 0 600 160" class="trend-chart" role="img" aria-label="同步延迟趋势">
-            <line x1="24" y1="138" x2="576" y2="138" />
-            <line x1="24" y1="30" x2="24" y2="138" />
+            {#each delayTicks as tick}
+              <line class="grid-line" x1={chartLeft} y1={chartY(tick.value, maxDelay)} x2={chartRight} y2={chartY(tick.value, maxDelay)} />
+              <text class="axis-label" x={chartLeft - 8} y={chartY(tick.value, maxDelay) + 4} text-anchor="end">{tick.label}</text>
+            {/each}
+            <line x1={chartLeft} y1={chartBottom} x2={chartRight} y2={chartBottom} />
+            <line x1={chartLeft} y1={chartTop} x2={chartLeft} y2={chartBottom} />
             <polyline points={delayPolyline} />
+            {#each metricPoints as point, index}
+              <circle class:active-point={index === resolveActiveIndex(activeDelayIndex)} class="trend-point" cx={chartX(index)} cy={chartY(Number(point.delay_seconds || 0), maxDelay)} r="4" />
+              <rect class="trend-hit" x={chartX(index) - hitWidth() / 2} y={chartTop} width={hitWidth()} height={chartBottom - chartTop + 16} on:mouseenter={() => selectDelayPoint(index)} on:click={() => selectDelayPoint(index)} />
+            {/each}
+            {#each xAxisLabels as label}
+              <text class="axis-label axis-time" x={chartX(label.index)} y="150" text-anchor="middle">{label.label}</text>
+            {/each}
           </svg>
         </div>
         <div class="trend-card">
           <div class="trend-card-head"><strong>行数变化</strong><span>峰值 {compactNumber(maxRows)} 行</span></div>
+          {#if rowsPoint}
+            <div class="trend-inspector rows-inspector"><span>{metricTime(rowsPoint.time)}</span><span>总计 {compactNumber(rowsPoint.total_rows || metricRowTotal(rowsPoint))} 行</span><span>读取 {compactNumber(rowsPoint.read_rows)} 行</span><span>新增 {compactNumber(rowsPoint.insert_rows)} 行</span><span>更新 {compactNumber(rowsPoint.update_rows)} 行</span><span>删除 {compactNumber(rowsPoint.delete_rows)} 行</span></div>
+          {/if}
           <svg viewBox="0 0 600 160" class="trend-chart bar-chart" role="img" aria-label="增改删读取行数">
-            <line x1="24" y1="138" x2="576" y2="138" />
+            {#each rowTicks as tick}
+              <line class="grid-line" x1={chartLeft} y1={chartY(tick.value, maxRows)} x2={chartRight} y2={chartY(tick.value, maxRows)} />
+              <text class="axis-label" x={chartLeft - 8} y={chartY(tick.value, maxRows) + 4} text-anchor="end">{tick.label}</text>
+            {/each}
+            <line x1={chartLeft} y1={chartBottom} x2={chartRight} y2={chartBottom} />
+            <line x1={chartLeft} y1={chartTop} x2={chartLeft} y2={chartBottom} />
             {#each metricPoints as point, index}
-              {@const total = metricRowTotal(point)}
-              {@const x = chartX(index) - 3}
-              {@const readH = (Number(point.read_rows || 0) * 108) / maxRows}
-              {@const insertH = (Number(point.insert_rows || 0) * 108) / maxRows}
-              {@const updateH = (Number(point.update_rows || 0) * 108) / maxRows}
-              {@const deleteH = (Number(point.delete_rows || 0) * 108) / maxRows}
+              {@const total = Number(point.total_rows || metricRowTotal(point))}
+              {@const x = chartX(index) - barWidth() / 2}
+              {@const readH = (Number(point.read_rows || 0) * chartHeight) / maxRows}
+              {@const insertH = (Number(point.insert_rows || 0) * chartHeight) / maxRows}
+              {@const updateH = (Number(point.update_rows || 0) * chartHeight) / maxRows}
+              {@const deleteH = (Number(point.delete_rows || 0) * chartHeight) / maxRows}
               {#if total > 0}
-                <rect class="read" x={x} y={138 - readH} width="6" height={readH} />
-                <rect class="insert" x={x} y={138 - readH - insertH} width="6" height={insertH} />
-                <rect class="update" x={x} y={138 - readH - insertH - updateH} width="6" height={updateH} />
-                <rect class="delete" x={x} y={138 - readH - insertH - updateH - deleteH} width="6" height={deleteH} />
+                <rect class:active-bar={index === resolveActiveIndex(activeRowsIndex)} class="read" x={x} y={chartBottom - readH} width={barWidth()} height={readH} />
+                <rect class:active-bar={index === resolveActiveIndex(activeRowsIndex)} class="insert" x={x} y={chartBottom - readH - insertH} width={barWidth()} height={insertH} />
+                <rect class:active-bar={index === resolveActiveIndex(activeRowsIndex)} class="update" x={x} y={chartBottom - readH - insertH - updateH} width={barWidth()} height={updateH} />
+                <rect class:active-bar={index === resolveActiveIndex(activeRowsIndex)} class="delete" x={x} y={chartBottom - readH - insertH - updateH - deleteH} width={barWidth()} height={deleteH} />
               {/if}
+              <rect class="trend-hit" x={chartX(index) - hitWidth() / 2} y={chartTop} width={hitWidth()} height={chartBottom - chartTop + 16} on:mouseenter={() => selectRowsPoint(index)} on:click={() => selectRowsPoint(index)} />
+            {/each}
+            {#each xAxisLabels as label}
+              <text class="axis-label axis-time" x={chartX(label.index)} y="150" text-anchor="middle">{label.label}</text>
             {/each}
           </svg>
           <div class="trend-legend"><span class="read">读取</span><span class="insert">新增</span><span class="update">更新</span><span class="delete">删除</span></div>
