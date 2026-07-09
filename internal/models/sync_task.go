@@ -167,7 +167,7 @@ type SyncXAPreparedTransaction struct {
 	CreatedAt      time.Time `json:"created_at"`
 	UpdatedAt      time.Time `json:"updated_at"`
 	TaskID         uint      `gorm:"not null;uniqueIndex:uk_task_xa" json:"task_id"`
-	XIDKey         string    `gorm:"size:255;not null;uniqueIndex:uk_task_xa" json:"xid_key"`
+	XIDKey         string    `gorm:"column:xid_key;size:255;not null;uniqueIndex:uk_task_xa" json:"xid_key"`
 	BinlogFile     string    `gorm:"size:255;not null" json:"binlog_file"`
 	BinlogPosition uint32    `gorm:"not null" json:"binlog_position"`
 	OperationsJSON string    `gorm:"type:text;not null" json:"operations_json"`

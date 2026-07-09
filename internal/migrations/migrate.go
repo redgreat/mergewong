@@ -103,6 +103,10 @@ func (m *Migrator) checkConnection(db *gorm.DB) error {
 func (m *Migrator) migrateSchema(db *gorm.DB) error {
 	log.Println("[2/3] 迁移数据库表结构...")
 
+	if err := m.normalizeXAPreparedSchema(db); err != nil {
+		return err
+	}
+
 	// 定义所有需要迁移的模型
 	modelList := []interface{}{
 		&models.User{},
@@ -142,6 +146,38 @@ func (m *Migrator) migrateSchema(db *gorm.DB) error {
 	}
 
 	log.Println("  ✓ 所有表结构迁移完成")
+	return nil
+}
+
+func (m *Migrator) normalizeXAPreparedSchema(db *gorm.DB) error {
+	tableName := (&models.SyncXAPreparedTransaction{}).TableName()
+	if !db.Migrator().HasTable(tableName) {
+		return nil
+	}
+	switch db.Dialector.Name() {
+	case "postgres":
+		if err := db.Exec(`
+DO $$
+BEGIN
+	IF EXISTS (
+		SELECT 1 FROM information_schema.columns
+		WHERE table_name = 'sync_xa_prepared_transactions' AND column_name = 'x_id_key'
+	) AND NOT EXISTS (
+		SELECT 1 FROM information_schema.columns
+		WHERE table_name = 'sync_xa_prepared_transactions' AND column_name = 'xid_key'
+	) THEN
+		ALTER TABLE sync_xa_prepared_transactions RENAME COLUMN x_id_key TO xid_key;
+	END IF;
+END $$;`).Error; err != nil {
+			return err
+		}
+	case "mysql":
+		if db.Migrator().HasColumn(tableName, "x_id_key") && !db.Migrator().HasColumn(tableName, "xid_key") {
+			if err := db.Exec("ALTER TABLE sync_xa_prepared_transactions CHANGE COLUMN x_id_key xid_key varchar(255) NOT NULL").Error; err != nil {
+				return err
+			}
+		}
+	}
 	return nil
 }
 

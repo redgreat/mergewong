@@ -259,6 +259,8 @@ input:focus, select:focus, textarea:focus { border-color: var(--primary); box-sh
 .log-detail { max-width: 440px; white-space: normal; line-height: 1.45; }
 .task-name-link { padding: 0; color: var(--primary); background: transparent; border: 0; font-weight: 650; }
 .task-name-link:hover:not(:disabled) { color: var(--primary-hover); background: transparent; text-decoration: underline; }
+.link-button { padding: 0; color: var(--primary); background: transparent; border: 0; font-weight: 650; text-decoration: underline; text-underline-offset: 2px; }
+.link-button:hover:not(:disabled) { color: var(--primary-hover); background: transparent; }
 .task-detail-page { display: flex; flex-direction: column; gap: 18px; }
 .detail-heading { display: flex; align-items: flex-end; justify-content: space-between; gap: 20px; }
 .detail-heading h2 { margin: 14px 0 4px; font-size: 24px; }
@@ -283,6 +285,18 @@ input:focus, select:focus, textarea:focus { border-color: var(--primary); box-sh
 .inline-error { margin: 0 24px 14px; padding: 10px 12px; border: 1px solid color-mix(in srgb, var(--danger) 35%, transparent); border-radius: 8px; color: var(--danger); background: color-mix(in srgb, var(--danger) 8%, transparent); font-size: 13px; }
 .repair-table .repair-empty-row td { height: 190px; }
 .repair-empty { min-height: 190px; padding: 28px; }
+.diff-modal { width: min(1080px, 96vw); max-height: calc(100vh - 48px); overflow: hidden; display: flex; flex-direction: column; }
+.diff-modal .modal-error { margin-inline: 0; }
+.diff-table { table-layout: fixed; }
+.diff-table th:nth-child(1), .diff-table td:nth-child(1) { width: 220px; }
+.diff-table th:nth-child(2), .diff-table td:nth-child(2) { width: 100px; }
+.diff-table th:nth-child(3), .diff-table td:nth-child(3) { width: 90px; }
+.diff-table tbody { vertical-align: top; }
+.diff-table td { height: auto; min-height: 52px; padding-top: 12px; padding-bottom: 12px; }
+.field-diff-list { display: grid; gap: 8px; max-height: 360px; overflow-y: auto; }
+.field-diff-row { display: grid; grid-template-columns: minmax(120px, .7fr) minmax(0, 1fr) minmax(0, 1fr); gap: 10px; align-items: start; padding: 8px 10px; background: var(--surface-subtle); border: 1px solid var(--border-soft); border-radius: 8px; }
+.field-diff-row strong, .field-diff-row span { overflow-wrap: anywhere; font-size: 12px; line-height: 1.45; }
+.field-diff-row span { color: var(--text-secondary); }
 .server-metric-grid { padding: 0 24px 20px; }
 .monitor-section { border-top: 1px solid var(--border-soft); }
 .card-header.compact { padding-top: 18px; padding-bottom: 14px; }

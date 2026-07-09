@@ -6,6 +6,8 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"math"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -26,6 +28,19 @@ type RepairCompareRequest struct {
 	CutoffColumn string     `json:"cutoff_column"`
 }
 
+type RepairDiffView struct {
+	models.SyncRepairDiff
+	Fields []RepairFieldDiff `json:"fields"`
+}
+
+type RepairFieldDiff struct {
+	SourceField string      `json:"source_field"`
+	TargetField string      `json:"target_field"`
+	SourceValue interface{} `json:"source_value"`
+	TargetValue interface{} `json:"target_value"`
+	Equal       bool        `json:"equal"`
+}
+
 var repairCancels sync.Map
 
 func NewRepairService() *RepairService {
@@ -39,7 +54,7 @@ func (s *RepairService) ListJobs(taskID uint) ([]models.SyncRepairJob, error) {
 	return jobs, err
 }
 
-func (s *RepairService) ListDiffs(jobID uint, page, pageSize int) ([]models.SyncRepairDiff, int64, error) {
+func (s *RepairService) ListDiffs(jobID uint, page, pageSize int) ([]RepairDiffView, int64, error) {
 	var total int64
 	query := s.systemDB.Model(&models.SyncRepairDiff{}).Where("job_id = ?", jobID)
 	if err := query.Count(&total).Error; err != nil {
@@ -47,7 +62,11 @@ func (s *RepairService) ListDiffs(jobID uint, page, pageSize int) ([]models.Sync
 	}
 	var diffs []models.SyncRepairDiff
 	err := query.Order("id ASC").Offset((page - 1) * pageSize).Limit(pageSize).Find(&diffs).Error
-	return diffs, total, err
+	if err != nil {
+		return nil, 0, err
+	}
+	views, err := s.enrichDiffs(diffs)
+	return views, total, err
 }
 
 func (s *RepairService) StartCompare(taskID uint, req RepairCompareRequest) (*models.SyncRepairJob, error) {
@@ -210,7 +229,7 @@ func (s *RepairService) compareTable(ctx context.Context, job *models.SyncRepair
 			} else {
 				targetHash := hashRepairRow(targetRow, pairs, false)
 				if sourceHash != targetHash {
-					diffs = append(diffs, newRepairDiff(job, mapping, lastPK, lastPK, "mismatch", sourceHash, targetHash, "字段值不一致"))
+					diffs = append(diffs, newRepairDiff(job, mapping, lastPK, lastPK, "mismatch", sourceHash, targetHash, mismatchMessage(row, targetRow, pairs)))
 				}
 			}
 		}
@@ -379,6 +398,56 @@ func (s *RepairService) finishJob(ctx context.Context, job *models.SyncRepairJob
 	}
 	_ = s.systemDB.Model(job).Updates(updates).Error
 	_ = NewSyncService().UpdateTask(job.TaskID, map[string]interface{}{"repair_status": "idle"})
+}
+
+func (s *RepairService) enrichDiffs(diffs []models.SyncRepairDiff) ([]RepairDiffView, error) {
+	views := make([]RepairDiffView, 0, len(diffs))
+	if len(diffs) == 0 {
+		return views, nil
+	}
+	task, err := NewSyncService().GetTask(diffs[0].TaskID)
+	if err != nil {
+		return nil, err
+	}
+	sourceDB, err := database.GetManager().GetConnection(task.SourceDB)
+	if err != nil {
+		return nil, err
+	}
+	targetDB, err := database.GetManager().GetConnection(task.TargetDB)
+	if err != nil {
+		return nil, err
+	}
+	tableByID := map[uint]*models.SyncTaskTable{}
+	for i := range task.TaskTables {
+		tableByID[task.TaskTables[i].ID] = &task.TaskTables[i]
+	}
+	for _, diff := range diffs {
+		view := RepairDiffView{SyncRepairDiff: diff}
+		mapping := tableByID[diff.TaskTableID]
+		if mapping == nil {
+			views = append(views, view)
+			continue
+		}
+		sourceColumns, err := selectableSourceColumns(task, mapping, sourceDB)
+		if err != nil {
+			return nil, err
+		}
+		pairs, err := syncColumnPairs(targetDB, mapping, sourceColumns)
+		if err != nil {
+			return nil, err
+		}
+		sourceRow, err := readSingleSourceRow(sourceDB, mapping.SourceTable, mapping.SourcePrimaryKey, sourcePairColumns(pairs), diff.SourcePK)
+		if err != nil {
+			return nil, err
+		}
+		targetRow, err := readSingleSourceRow(targetDB, mapping.TargetTable, mapping.TargetPrimaryKey, targetPairColumns(pairs), diff.TargetPK)
+		if err != nil {
+			return nil, err
+		}
+		view.Fields = compareRepairFields(sourceRow, targetRow, pairs)
+		views = append(views, view)
+	}
+	return views, nil
 }
 
 func newRepairDiff(job *models.SyncRepairJob, mapping *models.SyncTaskTable, sourcePK, targetPK, diffType, sourceHash, targetHash, message string) models.SyncRepairDiff {
@@ -564,9 +633,9 @@ func hashRepairRow(row map[string]interface{}, pairs []syncColumnPair, source bo
 		key := pair.target
 		sourceKey := pair.source
 		if source {
-			values[key] = normalizeHashValue(row[sourceKey])
+			values[key] = comparableValue(row[sourceKey])
 		} else {
-			values[key] = normalizeHashValue(row[key])
+			values[key] = comparableValue(row[key])
 		}
 	}
 	bytes, _ := json.Marshal(values)
@@ -574,13 +643,133 @@ func hashRepairRow(row map[string]interface{}, pairs []syncColumnPair, source bo
 	return hex.EncodeToString(sum[:])
 }
 
-func normalizeHashValue(value interface{}) interface{} {
+func mismatchMessage(sourceRow, targetRow map[string]interface{}, pairs []syncColumnPair) string {
+	fields := []string{}
+	for _, field := range compareRepairFields(sourceRow, targetRow, pairs) {
+		if !field.Equal {
+			fields = append(fields, field.TargetField)
+		}
+	}
+	if len(fields) == 0 {
+		return "字段值不一致"
+	}
+	if len(fields) > 8 {
+		fields = append(fields[:8], fmt.Sprintf("等 %d 个字段", len(fields)))
+	}
+	return "字段值不一致: " + strings.Join(fields, ", ")
+}
+
+func compareRepairFields(sourceRow, targetRow map[string]interface{}, pairs []syncColumnPair) []RepairFieldDiff {
+	fields := make([]RepairFieldDiff, 0, len(pairs))
+	for _, pair := range pairs {
+		sourceValue := valueFromRow(sourceRow, pair.source)
+		targetValue := valueFromRow(targetRow, pair.target)
+		fields = append(fields, RepairFieldDiff{
+			SourceField: pair.source,
+			TargetField: pair.target,
+			SourceValue: displayRepairValue(sourceValue),
+			TargetValue: displayRepairValue(targetValue),
+			Equal:       comparableValue(sourceValue) == comparableValue(targetValue),
+		})
+	}
+	return fields
+}
+
+func valueFromRow(row map[string]interface{}, key string) interface{} {
+	if row == nil {
+		return nil
+	}
+	return row[key]
+}
+
+func displayRepairValue(value interface{}) interface{} {
 	switch typed := value.(type) {
 	case time.Time:
 		return typed.Format("2006-01-02 15:04:05.999999")
+	case []byte:
+		return string(typed)
 	default:
 		return typed
 	}
+}
+
+func comparableValue(value interface{}) string {
+	switch typed := value.(type) {
+	case nil:
+		return "<NULL>"
+	case time.Time:
+		return normalizeTimeComparable(typed)
+	case []byte:
+		return comparableString(string(typed))
+	case string:
+		return comparableString(typed)
+	case bool:
+		if typed {
+			return "1"
+		}
+		return "0"
+	case int:
+		return strconv.FormatInt(int64(typed), 10)
+	case int8:
+		return strconv.FormatInt(int64(typed), 10)
+	case int16:
+		return strconv.FormatInt(int64(typed), 10)
+	case int32:
+		return strconv.FormatInt(int64(typed), 10)
+	case int64:
+		return strconv.FormatInt(typed, 10)
+	case uint:
+		return strconv.FormatUint(uint64(typed), 10)
+	case uint8:
+		return strconv.FormatUint(uint64(typed), 10)
+	case uint16:
+		return strconv.FormatUint(uint64(typed), 10)
+	case uint32:
+		return strconv.FormatUint(uint64(typed), 10)
+	case uint64:
+		return strconv.FormatUint(typed, 10)
+	case float32:
+		return strconv.FormatFloat(float64(typed), 'f', -1, 32)
+	case float64:
+		if math.IsNaN(typed) {
+			return "NaN"
+		}
+		return strconv.FormatFloat(typed, 'f', -1, 64)
+	default:
+		return fmt.Sprint(typed)
+	}
+}
+
+func comparableString(value string) string {
+	if parsed, ok := parseComparableTime(value); ok {
+		return normalizeTimeComparable(parsed)
+	}
+	return value
+}
+
+func parseComparableTime(value string) (time.Time, bool) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return time.Time{}, false
+	}
+	layouts := []string{
+		time.RFC3339Nano,
+		"2006-01-02 15:04:05.999999",
+		"2006-01-02 15:04:05.999",
+		"2006-01-02 15:04:05",
+		"2006-01-02T15:04:05.999999",
+		"2006-01-02T15:04:05",
+	}
+	for _, layout := range layouts {
+		if parsed, err := time.ParseInLocation(layout, value, time.Local); err == nil {
+			return parsed, true
+		}
+	}
+	return time.Time{}, false
+}
+
+func normalizeTimeComparable(value time.Time) string {
+	return value.Format("2006-01-02 15:04:05.999999")
 }
 
 func sourcePairColumns(pairs []syncColumnPair) []string {

@@ -11,9 +11,16 @@
   const runtimeText = (state) => ({ pending:"待预检查", initializing:"全量初始化", catching_up:"增量追数", cdc_running:"增量同步中", paused:"暂停", stopped:"停止", completed:"完成", failed:"失败" }[state] || state);
   const jobText = (status) => ({ running:"执行中", canceling:"取消中", canceled:"已取消", success:"完成", failed:"失败" }[status] || status || "-");
   const jobTypeText = (type) => ({ compare:"全量对比", repair:"补数" }[type] || type);
+  const diffTypeText = (type) => ({ missing_target:"目标缺少", missing_source:"源端缺少", mismatch:"字段不一致" }[type] || type || "-");
   const delayText = (seconds=0) => `${(seconds * 1000).toLocaleString()} ms`;
   let repairJobs = [];
+  let repairDiffs = [];
   let repairError = "";
+  let diffError = "";
+  let diffJob = null;
+  let diffPage = 1;
+  let diffTotal = 0;
+  const diffPageSize = 10;
   let cutoffColumn = "LastUpdateTime";
   let cutoffTime = "";
   let timeColumns = [];
@@ -23,8 +30,8 @@
 	$: snapshotTotal = (task.task_tables || []).reduce((sum, table) => sum + Number(table.snapshot_total || 0), 0);
 	$: snapshotProcessed = (task.task_tables || []).reduce((sum, table) => sum + Number(table.snapshot_processed || 0), 0);
 	$: overallPercent = snapshotTotal > 0 ? Math.min(100, snapshotProcessed * 100 / snapshotTotal) : ((task.task_tables || []).every((table) => table.sync_state === "active") ? 100 : 0);
-  $: latestCompare = repairJobs.find((job) => job.job_type === "compare" && job.status === "success" && job.diff_rows > 0);
   $: runningJob = repairJobs.find((job) => job.status === "running" || job.status === "canceling");
+  $: diffTotalPages = Math.max(1, Math.ceil(diffTotal / diffPageSize));
   $: if (task.id && token && loadedCutoffTaskId !== task.id) {
     loadedCutoffTaskId = task.id;
     cutoffTime = toLocalDateTimeInput(new Date());
@@ -66,6 +73,32 @@
     if (!task.id || !token) return;
     try { repairJobs = await request(`/api/sync/tasks/${task.id}/repair/jobs`, { token }); repairError = ""; }
     catch (err) { repairError = err.message; }
+  }
+  function canRepairJob(job) {
+    return canManage && job.job_type === "compare" && job.status === "success" && Number(job.diff_rows || 0) > 0;
+  }
+  function valueText(value) {
+    if (value === null || value === undefined) return "NULL";
+    if (typeof value === "object") return JSON.stringify(value);
+    return String(value);
+  }
+  function changedFields(diff) {
+    return (diff.fields || []).filter((field) => !field.equal);
+  }
+  async function openDiffs(job, page = 1) {
+    if (!job || Number(job.diff_rows || 0) <= 0) return;
+    diffJob = job;
+    diffPage = page;
+    try {
+      const result = await request(`/api/sync/repair/jobs/${job.id}/diffs`, { token, params: { page, page_size: diffPageSize } });
+      repairDiffs = result.data || [];
+      diffTotal = result.total || 0;
+      diffError = "";
+    } catch (err) {
+      diffError = err.message;
+      repairDiffs = [];
+      diffTotal = 0;
+    }
   }
   async function startCompare() {
     if (!task.id || repairBusy) return;
@@ -125,7 +158,6 @@
         <div class="header-actions">
           {#if runningJob}<button class="ghost icon-text" disabled={repairBusy} on:click={() => cancelRepair(runningJob)}><X size={15}/>取消</button>{/if}
           <button class="ghost icon-text" disabled={repairBusy || !!runningJob} on:click={startCompare}><ShieldAlert size={15}/>全量对比</button>
-          <button class="icon-text" disabled={repairBusy || !!runningJob || !latestCompare} on:click={() => startRepair(latestCompare)}><RotateCw size={15}/>一键补数</button>
         </div>
       {/if}
     </div>
@@ -144,21 +176,68 @@
     {/if}
     {#if repairError}<div class="inline-error">{repairError}</div>{/if}
     <table class="data-table repair-table">
-      <thead><tr><th>类型</th><th>状态</th><th>进度</th><th>差异</th><th>已补数</th><th>说明</th><th>开始时间</th></tr></thead>
+      <thead><tr><th>类型</th><th>状态</th><th>进度</th><th>差异</th><th>已补数</th><th>说明</th><th>开始时间</th>{#if canManage}<th>操作</th>{/if}</tr></thead>
       <tbody>
-        {#if repairJobs.length === 0}<tr class="empty-row repair-empty-row"><td colspan="7"><div class="empty-state repair-empty"><span class="empty-icon"><ShieldAlert size={24} /></span><strong>暂无数据修复任务</strong><p>发起全量对比后，可以根据差异一键补数。</p></div></td></tr>{/if}
+        {#if repairJobs.length === 0}<tr class="empty-row repair-empty-row"><td colspan={canManage ? 8 : 7}><div class="empty-state repair-empty"><span class="empty-icon"><ShieldAlert size={24} /></span><strong>暂无数据修复任务</strong><p>发起全量对比后，可以根据差异一键补数。</p></div></td></tr>{/if}
         {#each repairJobs as job}
           <tr>
             <td>{jobTypeText(job.job_type)}</td>
             <td><span class={`pill ${job.status === "failed" ? "danger" : job.status === "success" ? "success" : "muted"}`}>{jobText(job.status)}</span></td>
             <td>{(job.progress_percent || 0).toFixed(1)}%</td>
-            <td>{job.diff_rows || 0}</td>
+            <td>{#if Number(job.diff_rows || 0) > 0}<button class="link-button" on:click={() => openDiffs(job)}>{job.diff_rows}</button>{:else}0{/if}</td>
             <td>{job.repaired_rows || 0}</td>
             <td>{job.error_detail || job.message || "-"}</td>
             <td>{job.started_at ? new Date(job.started_at).toLocaleString() : "-"}</td>
+            {#if canManage}<td>{#if canRepairJob(job)}<button class="ghost icon-text" disabled={repairBusy || !!runningJob} on:click={() => startRepair(job)}><RotateCw size={14}/>补这次</button>{:else}-{/if}</td>{/if}
           </tr>
         {/each}
       </tbody>
     </table>
   </section>
 </section>
+
+{#if diffJob}
+  <div class="modal-layer">
+    <button class="modal-backdrop" aria-label="关闭" on:click={() => (diffJob = null)}></button>
+    <div class="modal diff-modal">
+      <div class="modal-header">
+        <div><h3>差异明细</h3><p>{jobTypeText(diffJob.job_type)} · {diffJob.started_at ? new Date(diffJob.started_at).toLocaleString() : "-"}</p></div>
+        <button class="ghost icon" on:click={() => (diffJob = null)}><X size={17} /></button>
+      </div>
+      {#if diffError}<div class="inline-error modal-error">{diffError}</div>{/if}
+      <table class="data-table diff-table">
+        <thead><tr><th>主键</th><th>类型</th><th>状态</th><th>字段差异</th></tr></thead>
+        <tbody>
+          {#if repairDiffs.length === 0}<tr class="empty-row"><td colspan="4"><div class="empty-state"><strong>暂无差异明细</strong></div></td></tr>{/if}
+          {#each repairDiffs as diff}
+            <tr>
+              <td><strong>{diff.source_pk}</strong><span class="cell-sub">{diff.source_table} → {diff.target_table}</span></td>
+              <td>{diffTypeText(diff.diff_type)}</td>
+              <td>{diff.status}</td>
+              <td>
+                {#if changedFields(diff).length > 0}
+                  <div class="field-diff-list">
+                    {#each changedFields(diff) as field}
+                      <div class="field-diff-row">
+                        <strong>{field.source_field} → {field.target_field}</strong>
+                        <span>源：{valueText(field.source_value)}</span>
+                        <span>目标：{valueText(field.target_value)}</span>
+                      </div>
+                    {/each}
+                  </div>
+                {:else}
+                  <span class="cell-sub">按当前字段映射回查已一致，可能是旧对比结果或数据已被补齐。</span>
+                {/if}
+              </td>
+            </tr>
+          {/each}
+        </tbody>
+      </table>
+      <div class="pager">
+        <button class="ghost" disabled={diffPage <= 1} on:click={() => openDiffs(diffJob, diffPage - 1)}>上一页</button>
+        <span>{diffPage} / {diffTotalPages}</span>
+        <button class="ghost" disabled={diffPage >= diffTotalPages} on:click={() => openDiffs(diffJob, diffPage + 1)}>下一页</button>
+      </div>
+    </div>
+  </div>
+{/if}
