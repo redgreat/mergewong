@@ -433,6 +433,7 @@ func (m *CDCManager) stream(ctx context.Context, task *models.SyncTask, source *
 				xaDebugReport("A", "cdc_service.go:QueryEvent", "识别到 XA QueryEvent", map[string]interface{}{"task_id": task.ID, "action": action, "xid_key": xidKey, "raw": rawQuery, "ops_len": len(operations), "file": currentFile, "pos": event.Header.LogPos, "event_ts": event.Header.Timestamp})
 				// #endregion
 				applied := int64(0)
+				deletePrepared := action == "rollback"
 				switch action {
 				case "prepare":
 					if err := m.saveXAPrepared(task.ID, xidKey, currentFile, event.Header.LogPos, operations); err != nil {
@@ -445,9 +446,7 @@ func (m *CDCManager) stream(ctx context.Context, task *models.SyncTask, source *
 						// #region debug-point B:xa_prepared_load_failed
 						xaDebugReport("B", "cdc_service.go:XA_COMMIT", "加载 XA prepared 失败", map[string]interface{}{"task_id": task.ID, "xid_key": xidKey, "err": err.Error(), "ops_len": len(operations)})
 						// #endregion
-						if len(operations) == 0 {
-							m.service.RecordTaskEvent(task, "xa_commit_without_prepare", "cdc", "warning", "XA COMMIT 未找到 prepared 缓存", fmt.Sprintf("xid=%s；按空事务跳过", xidKey), 0, 0)
-						} else {
+						if len(operations) > 0 {
 							applied = int64(len(operations))
 							if err := applyCDCTransaction(targetDB, operations); err != nil {
 								// #region debug-point D:apply_error_xa_commit_fallback
@@ -456,7 +455,11 @@ func (m *CDCManager) stream(ctx context.Context, task *models.SyncTask, source *
 								return err
 							}
 							operations = operations[:0]
+							deletePrepared = true
+							break
 						}
+						m.service.RecordTaskEvent(task, "xa_commit_without_prepare", "cdc", "failed", "XA COMMIT 未找到 prepared 缓存", fmt.Sprintf("xid=%s；已停止任务等待人工处理", xidKey), 0, 0)
+						return fmt.Errorf("XA COMMIT 未找到 prepared 缓存: xid=%s", xidKey)
 					} else {
 						// #region debug-point A:xa_prepared_loaded
 						xaDebugReport("A", "cdc_service.go:XA_COMMIT", "加载 XA prepared 成功并准备 apply", map[string]interface{}{"task_id": task.ID, "xid_key": xidKey, "prepared_ops_len": len(prepared), "file": currentFile, "pos": event.Header.LogPos})
@@ -468,11 +471,12 @@ func (m *CDCManager) stream(ctx context.Context, task *models.SyncTask, source *
 							// #endregion
 							return err
 						}
+						deletePrepared = true
 					}
 				case "rollback":
 					operations = operations[:0]
 				}
-				if action != "prepare" {
+				if deletePrepared {
 					if err := m.deleteXAPrepared(task.ID, xidKey); err != nil {
 						return err
 					}
