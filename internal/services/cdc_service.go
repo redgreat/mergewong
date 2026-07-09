@@ -677,6 +677,25 @@ func xaKey(formatID uint32, gtrid, bqual []byte) string {
 	return fmt.Sprintf("%d:%s:%s", formatID, hex.EncodeToString(gtrid), hex.EncodeToString(bqual))
 }
 
+func normalizeXAPreparedValue(value interface{}) interface{} {
+	if t, ok := value.(time.Time); ok {
+		if t.IsZero() {
+			return value
+		}
+		return t.Format("2006-01-02 15:04:05")
+	}
+	if t, ok := value.(*time.Time); ok {
+		if t == nil {
+			return nil
+		}
+		if t.IsZero() {
+			return *t
+		}
+		return t.Format("2006-01-02 15:04:05")
+	}
+	return normalizeMySQLScannedValue(value)
+}
+
 func (m *CDCManager) saveXAPrepared(taskID uint, xidKey, file string, pos uint32, operations []cdcOperation) error {
 	if len(operations) == 0 {
 		var existing models.SyncXAPreparedTransaction
@@ -688,7 +707,7 @@ func (m *CDCManager) saveXAPrepared(taskID uint, xidKey, file string, pos uint32
 	for _, op := range operations {
 		values := make([]interface{}, len(op.values))
 		for i := range op.values {
-			values[i] = normalizeMySQLScannedValue(op.values[i])
+			values[i] = normalizeXAPreparedValue(op.values[i])
 		}
 		records = append(records, cdcOperationRecord{Kind: op.kind, TaskTableID: op.mapping.ID, Columns: op.columns, Values: values})
 	}
