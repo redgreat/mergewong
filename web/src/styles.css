@@ -280,6 +280,28 @@ input:focus, select:focus, textarea:focus { border-color: var(--primary); box-sh
 .detail-info-grid > div { display: flex; flex-direction: column; gap: 8px; padding: 18px 22px; background: var(--surface); }
 .detail-info-grid span { color: var(--text-muted); font-size: 12px; }
 .detail-info-grid strong { font-size: 14px; }
+.trend-section { padding-bottom: 18px; }
+.metric-range-actions { flex-wrap: wrap; justify-content: flex-end; }
+.metric-query-row { display: grid; grid-template-columns: repeat(2, minmax(220px, 280px)); gap: 14px; padding: 0 24px 18px; }
+.metric-query-row label { display: flex; flex-direction: column; gap: 7px; color: var(--text-secondary); font-size: 12px; font-weight: 550; }
+.trend-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; padding: 0 24px; }
+.trend-card { min-width: 0; padding: 14px 16px; background: var(--surface-subtle); border: 1px solid var(--border-soft); border-radius: 10px; }
+.trend-card-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
+.trend-card-head strong { font-size: 14px; }
+.trend-card-head span, .trend-foot { color: var(--text-muted); font-size: 12px; }
+.trend-chart { display: block; width: 100%; height: 180px; }
+.trend-chart line { stroke: var(--border); stroke-width: 1; }
+.trend-chart polyline { fill: none; stroke: var(--primary); stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; }
+.trend-chart rect { rx: 2px; }
+.trend-chart .read, .trend-legend .read::before { fill: #94a3b8; background: #94a3b8; }
+.trend-chart .insert, .trend-legend .insert::before { fill: #10b981; background: #10b981; }
+.trend-chart .update, .trend-legend .update::before { fill: #3b82f6; background: #3b82f6; }
+.trend-chart .delete, .trend-legend .delete::before { fill: #f43f5e; background: #f43f5e; }
+.trend-legend { display: flex; flex-wrap: wrap; gap: 12px; color: var(--text-secondary); font-size: 12px; }
+.trend-legend span { display: inline-flex; align-items: center; gap: 5px; }
+.trend-legend span::before { content: ""; width: 8px; height: 8px; border-radius: 2px; }
+.trend-foot { padding: 12px 24px 0; }
+.trend-empty { min-height: 160px; }
 .repair-toolbar { display: grid; grid-template-columns: repeat(2, minmax(180px, 260px)); gap: 14px; padding: 0 24px 18px; }
 .repair-toolbar label { display: flex; flex-direction: column; gap: 7px; color: var(--text-secondary); font-size: 12px; font-weight: 550; }
 .inline-error { margin: 0 24px 14px; padding: 10px 12px; border: 1px solid color-mix(in srgb, var(--danger) 35%, transparent); border-radius: 8px; color: var(--danger); background: color-mix(in srgb, var(--danger) 8%, transparent); font-size: 13px; }

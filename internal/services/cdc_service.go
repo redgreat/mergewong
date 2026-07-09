@@ -1,12 +1,16 @@
 package services
 
 import (
+	"bytes"
 	"context"
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log"
+	"net/http"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -33,6 +37,12 @@ type cdcOperationRecord struct {
 	Values      []interface{} `json:"values"`
 }
 
+type cdcOperationMetrics struct {
+	Insert int64 `json:"insert"`
+	Update int64 `json:"update"`
+	Delete int64 `json:"delete"`
+}
+
 type CDCManager struct {
 	service *SyncService
 	mu      sync.Mutex
@@ -48,6 +58,59 @@ type cdcWorker struct {
 
 var cdcManager *CDCManager
 var cdcOnce sync.Once
+
+// #region debug-point xa-tx-not-synced:reporter
+var xaDebugOnce sync.Once
+var xaDebugServerURL string
+var xaDebugSessionID string
+
+func xaDebugReport(hypothesisID, location, msg string, data map[string]interface{}) {
+	xaDebugOnce.Do(func() {
+		xaDebugServerURL = "http://127.0.0.1:7777/event"
+		xaDebugSessionID = "xa-tx-not-synced"
+		content, err := os.ReadFile(filepath.Join(".dbg", "xa-tx-not-synced.env"))
+		if err != nil {
+			return
+		}
+		for _, line := range strings.Split(string(content), "\n") {
+			line = strings.TrimSpace(line)
+			if strings.HasPrefix(line, "DEBUG_SERVER_URL=") {
+				xaDebugServerURL = strings.TrimSpace(strings.TrimPrefix(line, "DEBUG_SERVER_URL="))
+			}
+			if strings.HasPrefix(line, "DEBUG_SESSION_ID=") {
+				xaDebugSessionID = strings.TrimSpace(strings.TrimPrefix(line, "DEBUG_SESSION_ID="))
+			}
+		}
+	})
+	payload, err := json.Marshal(map[string]interface{}{
+		"sessionId":     xaDebugSessionID,
+		"runId":         "pre",
+		"hypothesisId":  hypothesisID,
+		"location":      location,
+		"msg":           "[DEBUG] " + msg,
+		"data":          data,
+		"ts":            time.Now().UnixMilli(),
+		"traceId":       "",
+		"service":       "cdc",
+		"task_debug_id": data["task_id"],
+	})
+	if err != nil {
+		return
+	}
+	go func(url string, body []byte) {
+		req, reqErr := http.NewRequest("POST", url, bytes.NewReader(body))
+		if reqErr != nil {
+			return
+		}
+		req.Header.Set("Content-Type", "application/json")
+		resp, doErr := http.DefaultClient.Do(req)
+		if doErr == nil && resp != nil && resp.Body != nil {
+			_ = resp.Body.Close()
+		}
+	}(xaDebugServerURL, payload)
+}
+
+// #endregion
 
 func GetCDCManager() *CDCManager {
 	cdcOnce.Do(func() { cdcManager = &CDCManager{service: NewSyncService(), workers: map[uint]cdcWorker{}} })
@@ -267,7 +330,11 @@ func (m *CDCManager) stream(ctx context.Context, task *models.SyncTask, source *
 	currentFile := checkpoint.BinlogFile
 	streamStarted := time.Now()
 	lastMetricsUpdate := time.Time{}
+	lastMetricsLog := time.Time{}
+	lastMetricsRows := int64(0)
+	lastMetricsOps := cdcOperationMetrics{}
 	var sessionRows int64
+	var opMetrics cdcOperationMetrics
 	_ = m.service.UpdateTask(task.ID, map[string]interface{}{"runtime_status": "catching_up", "phase_started_at": &streamStarted, "last_run_message": "增量追数中"})
 
 	startTitle := "Binlog 增量同步开始"
@@ -285,6 +352,9 @@ func (m *CDCManager) stream(ctx context.Context, task *models.SyncTask, source *
 			if parseErr != nil {
 				return parseErr
 			}
+			// #region debug-point A:xa_prepare_log_event
+			xaDebugReport("A", "cdc_service.go:XA_PREPARE_LOG_EVENT", "捕获 XA_PREPARE_LOG_EVENT", map[string]interface{}{"task_id": task.ID, "xid_key": xidKey, "one_phase": onePhase, "ops_len": len(operations), "file": currentFile, "pos": event.Header.LogPos, "event_ts": event.Header.Timestamp})
+			// #endregion
 			applied := int64(len(operations))
 			if onePhase {
 				if err := applyCDCTransaction(targetDB, operations); err != nil {
@@ -295,7 +365,7 @@ func (m *CDCManager) stream(ctx context.Context, task *models.SyncTask, source *
 			}
 			operations = operations[:0]
 			sessionRows += applied
-			if err := m.advanceCheckpoint(task, checkpoint, currentFile, event.Header.LogPos, sessionRows, streamStarted, event.Header.Timestamp, &lastMetricsUpdate); err != nil {
+			if err := m.advanceCheckpoint(task, checkpoint, currentFile, event.Header.LogPos, sessionRows, streamStarted, event.Header.Timestamp, &lastMetricsUpdate, &lastMetricsLog, &lastMetricsRows, &lastMetricsOps, opMetrics); err != nil {
 				return err
 			}
 			continue
@@ -326,30 +396,42 @@ func (m *CDCManager) stream(ctx context.Context, task *models.SyncTask, source *
 			case replication.WRITE_ROWS_EVENTv1, replication.WRITE_ROWS_EVENTv2:
 				for _, row := range e.Rows {
 					operations = append(operations, cdcOperation{kind: "upsert", mapping: mapping, columns: columns, values: row})
+					opMetrics.Insert++
 				}
 			case replication.UPDATE_ROWS_EVENTv1, replication.UPDATE_ROWS_EVENTv2:
 				for i := 1; i < len(e.Rows); i += 2 {
 					operations = append(operations, cdcOperation{kind: "upsert", mapping: mapping, columns: columns, values: e.Rows[i]})
+					opMetrics.Update++
 				}
 			case replication.DELETE_ROWS_EVENTv1, replication.DELETE_ROWS_EVENTv2:
 				for _, row := range e.Rows {
 					operations = append(operations, cdcOperation{kind: "delete", mapping: mapping, columns: columns, values: row})
+					opMetrics.Delete++
 				}
 			}
 		case *replication.XIDEvent:
+			// #region debug-point A:xid_event_before_apply
+			xaDebugReport("A", "cdc_service.go:XIDEvent", "XIDEvent 提交点触发 apply", map[string]interface{}{"task_id": task.ID, "ops_len": len(operations), "file": currentFile, "pos": event.Header.LogPos, "event_ts": event.Header.Timestamp})
+			// #endregion
 			applied := int64(len(operations))
 			if err := applyCDCTransaction(targetDB, operations); err != nil {
+				// #region debug-point D:apply_error
+				xaDebugReport("D", "cdc_service.go:XIDEvent", "applyCDCTransaction 返回错误", map[string]interface{}{"task_id": task.ID, "ops_len": len(operations), "err": err.Error()})
+				// #endregion
 				return err
 			}
 			operations = operations[:0]
 			sessionRows += applied
-			if err := m.advanceCheckpoint(task, checkpoint, currentFile, event.Header.LogPos, sessionRows, streamStarted, event.Header.Timestamp, &lastMetricsUpdate); err != nil {
+			if err := m.advanceCheckpoint(task, checkpoint, currentFile, event.Header.LogPos, sessionRows, streamStarted, event.Header.Timestamp, &lastMetricsUpdate, &lastMetricsLog, &lastMetricsRows, &lastMetricsOps, opMetrics); err != nil {
 				return err
 			}
 		case *replication.QueryEvent:
 			rawQuery := strings.TrimSpace(string(e.Query))
 			query := strings.ToUpper(rawQuery)
 			if action, xidKey, ok := parseXAQuery(rawQuery); ok {
+				// #region debug-point A:xa_query_detected
+				xaDebugReport("A", "cdc_service.go:QueryEvent", "识别到 XA QueryEvent", map[string]interface{}{"task_id": task.ID, "action": action, "xid_key": xidKey, "raw": rawQuery, "ops_len": len(operations), "file": currentFile, "pos": event.Header.LogPos, "event_ts": event.Header.Timestamp})
+				// #endregion
 				applied := int64(0)
 				switch action {
 				case "prepare":
@@ -360,18 +442,30 @@ func (m *CDCManager) stream(ctx context.Context, task *models.SyncTask, source *
 				case "commit":
 					prepared, err := m.loadXAPreparedOperations(task, xidKey)
 					if err != nil {
+						// #region debug-point B:xa_prepared_load_failed
+						xaDebugReport("B", "cdc_service.go:XA_COMMIT", "加载 XA prepared 失败", map[string]interface{}{"task_id": task.ID, "xid_key": xidKey, "err": err.Error(), "ops_len": len(operations)})
+						// #endregion
 						if len(operations) == 0 {
 							m.service.RecordTaskEvent(task, "xa_commit_without_prepare", "cdc", "warning", "XA COMMIT 未找到 prepared 缓存", fmt.Sprintf("xid=%s；按空事务跳过", xidKey), 0, 0)
 						} else {
 							applied = int64(len(operations))
 							if err := applyCDCTransaction(targetDB, operations); err != nil {
+								// #region debug-point D:apply_error_xa_commit_fallback
+								xaDebugReport("D", "cdc_service.go:XA_COMMIT", "XA COMMIT fallback applyCDCTransaction 返回错误", map[string]interface{}{"task_id": task.ID, "ops_len": len(operations), "err": err.Error()})
+								// #endregion
 								return err
 							}
 							operations = operations[:0]
 						}
 					} else {
+						// #region debug-point A:xa_prepared_loaded
+						xaDebugReport("A", "cdc_service.go:XA_COMMIT", "加载 XA prepared 成功并准备 apply", map[string]interface{}{"task_id": task.ID, "xid_key": xidKey, "prepared_ops_len": len(prepared), "file": currentFile, "pos": event.Header.LogPos})
+						// #endregion
 						applied = int64(len(prepared))
 						if err := applyCDCTransaction(targetDB, prepared); err != nil {
+							// #region debug-point D:apply_error_xa_commit
+							xaDebugReport("D", "cdc_service.go:XA_COMMIT", "XA COMMIT applyCDCTransaction 返回错误", map[string]interface{}{"task_id": task.ID, "prepared_ops_len": len(prepared), "err": err.Error()})
+							// #endregion
 							return err
 						}
 					}
@@ -384,7 +478,7 @@ func (m *CDCManager) stream(ctx context.Context, task *models.SyncTask, source *
 					}
 				}
 				sessionRows += applied
-				if err := m.advanceCheckpoint(task, checkpoint, currentFile, event.Header.LogPos, sessionRows, streamStarted, event.Header.Timestamp, &lastMetricsUpdate); err != nil {
+				if err := m.advanceCheckpoint(task, checkpoint, currentFile, event.Header.LogPos, sessionRows, streamStarted, event.Header.Timestamp, &lastMetricsUpdate, &lastMetricsLog, &lastMetricsRows, &lastMetricsOps, opMetrics); err != nil {
 					return err
 				}
 				continue
@@ -396,7 +490,7 @@ func (m *CDCManager) stream(ctx context.Context, task *models.SyncTask, source *
 				}
 				operations = operations[:0]
 				sessionRows += applied
-				if err := m.advanceCheckpoint(task, checkpoint, currentFile, event.Header.LogPos, sessionRows, streamStarted, event.Header.Timestamp, &lastMetricsUpdate); err != nil {
+				if err := m.advanceCheckpoint(task, checkpoint, currentFile, event.Header.LogPos, sessionRows, streamStarted, event.Header.Timestamp, &lastMetricsUpdate, &lastMetricsLog, &lastMetricsRows, &lastMetricsOps, opMetrics); err != nil {
 					return err
 				}
 			}
@@ -404,7 +498,7 @@ func (m *CDCManager) stream(ctx context.Context, task *models.SyncTask, source *
 	}
 }
 
-func (m *CDCManager) advanceCheckpoint(task *models.SyncTask, checkpoint *models.SyncCDCCheckpoint, file string, pos uint32, sessionRows int64, started time.Time, eventTimestamp uint32, lastMetricsUpdate *time.Time) error {
+func (m *CDCManager) advanceCheckpoint(task *models.SyncTask, checkpoint *models.SyncCDCCheckpoint, file string, pos uint32, sessionRows int64, started time.Time, eventTimestamp uint32, lastMetricsUpdate, lastMetricsLog *time.Time, lastMetricsRows *int64, lastMetricsOps *cdcOperationMetrics, opMetrics cdcOperationMetrics) error {
 	now := time.Now()
 	if !lastMetricsUpdate.IsZero() && now.Sub(*lastMetricsUpdate) < time.Second {
 		return nil
@@ -428,7 +522,13 @@ func (m *CDCManager) advanceCheckpoint(task *models.SyncTask, checkpoint *models
 	if delay > 5 {
 		runtimeStatus = "catching_up"
 	}
-	return m.service.UpdateTask(task.ID, map[string]interface{}{"runtime_status": runtimeStatus, "rows_processed": task.RowsProcessed + sessionRows, "rows_per_second": speed, "delay_seconds": delay, "last_success_at": &now, "last_run_status": "running", "last_run_message": runtimeLabel(runtimeStatus)})
+	if err := m.service.UpdateTask(task.ID, map[string]interface{}{"runtime_status": runtimeStatus, "rows_processed": task.RowsProcessed + sessionRows, "rows_per_second": speed, "delay_seconds": delay, "last_success_at": &now, "last_run_status": "running", "last_run_message": runtimeLabel(runtimeStatus)}); err != nil {
+		return err
+	}
+	// #region debug-point E:checkpoint_advanced
+	xaDebugReport("E", "cdc_service.go:advanceCheckpoint", "推进 checkpoint/指标", map[string]interface{}{"task_id": task.ID, "file": file, "pos": pos, "delay_seconds": delay, "runtime_status": runtimeStatus, "session_rows": sessionRows, "op_metrics": opMetrics})
+	// #endregion
+	return m.service.RecordCDCMetricSnapshot(task, now, delay, speed, sessionRows, lastMetricsLog, lastMetricsRows, lastMetricsOps, opMetrics)
 }
 
 func mysqlColumnNames(connectionName, table string) ([]string, error) {

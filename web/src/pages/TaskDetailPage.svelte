@@ -21,6 +21,11 @@
   let diffPage = 1;
   let diffTotal = 0;
   const diffPageSize = 10;
+  let metricPoints = [];
+  let metricError = "";
+  let metricFrom = "";
+  let metricTo = "";
+  let loadedMetricTaskId = 0;
   let cutoffColumn = "LastUpdateTime";
   let cutoffTime = "";
   let timeColumns = [];
@@ -32,6 +37,14 @@
 	$: overallPercent = snapshotTotal > 0 ? Math.min(100, snapshotProcessed * 100 / snapshotTotal) : ((task.task_tables || []).every((table) => table.sync_state === "active") ? 100 : 0);
   $: runningJob = repairJobs.find((job) => job.status === "running" || job.status === "canceling");
   $: diffTotalPages = Math.max(1, Math.ceil(diffTotal / diffPageSize));
+  $: maxDelay = Math.max(1, ...metricPoints.map((point) => Number(point.delay_seconds || 0)));
+  $: maxRows = Math.max(1, ...metricPoints.map((point) => metricRowTotal(point)));
+  $: delayPolyline = metricPoints.map((point, index) => `${chartX(index)},${chartY(Number(point.delay_seconds || 0), maxDelay)}`).join(" ");
+  $: if (task.id && token && loadedMetricTaskId !== task.id) {
+    loadedMetricTaskId = task.id;
+    setMetricRange("24h", false);
+    loadMetrics();
+  }
   $: if (task.id && token && loadedCutoffTaskId !== task.id) {
     loadedCutoffTaskId = task.id;
     cutoffTime = toLocalDateTimeInput(new Date());
@@ -45,6 +58,45 @@
     if (!value) return "";
     const normalized = value.replace("T", " ");
     return normalized.length === 16 ? `${normalized}:00` : normalized;
+  }
+  function setMetricRange(range, refresh = true) {
+    const now = new Date();
+    const from = new Date(now);
+    if (range === "7d") from.setDate(from.getDate() - 7);
+    else if (range === "30d") from.setDate(from.getDate() - 30);
+    else from.setHours(from.getHours() - 24);
+    metricFrom = toLocalDateTimeInput(from);
+    metricTo = toLocalDateTimeInput(now);
+    if (refresh) loadMetrics();
+  }
+  async function loadMetrics() {
+    if (!task.id || !token) return;
+    try {
+      metricPoints = await request(`/api/sync/tasks/${task.id}/metrics`, { token, params: { from: normalizeCutoffTime(metricFrom), to: normalizeCutoffTime(metricTo) } });
+      metricError = "";
+    } catch (err) {
+      metricError = err.message;
+      metricPoints = [];
+    }
+  }
+  function chartX(index) {
+    if (metricPoints.length <= 1) return 24;
+    return 24 + (index * 552) / (metricPoints.length - 1);
+  }
+  function chartY(value, max) {
+    return 138 - (Number(value || 0) * 108) / max;
+  }
+  function metricRowTotal(point) {
+    return Number(point.insert_rows || 0) + Number(point.update_rows || 0) + Number(point.delete_rows || 0) + Number(point.read_rows || 0);
+  }
+  function metricTime(value) {
+    return value ? new Date(value).toLocaleString() : "-";
+  }
+  function compactNumber(value) {
+    const num = Number(value || 0);
+    if (num >= 1000000) return `${(num / 1000000).toFixed(1)}m`;
+    if (num >= 1000) return `${(num / 1000).toFixed(1)}k`;
+    return String(num);
   }
   const columnName = (column) => column.Field || column.field || column.COLUMN_NAME || column.column_name || "";
   const columnType = (column) => column.Type || column.type || column.DATA_TYPE || column.data_type || "";
@@ -132,7 +184,9 @@
   }
 	onMount(() => {
     loadRepairJobs();
-    const timer = setInterval(() => { onRefresh(); loadRepairJobs(); }, 2000);
+    loadMetrics();
+    let ticks = 0;
+    const timer = setInterval(() => { onRefresh(); loadRepairJobs(); ticks += 1; if (ticks % 15 === 0) loadMetrics(); }, 2000);
     return () => clearInterval(timer);
   });
 </script>
@@ -145,6 +199,58 @@
 	<div class="metric-card"><span><Database size={16}/>全量初始化进度</span><strong>{overallPercent.toFixed(1)}%</strong><small>{snapshotProcessed} / {snapshotTotal} 行</small></div>
     <div class="metric-card"><span>Binlog 位点</span><strong class="position-text">{task.cdc_checkpoint?.binlog_file || "-"}</strong><small>{task.cdc_checkpoint?.binlog_position || "-"}</small></div>
   </div>
+  <section class="workspace-panel detail-section trend-section">
+    <div class="card-header">
+      <div><h2>运行趋势</h2><p>保留最近 30 天的同步延迟、读取和增改删行数。</p></div>
+      <div class="header-actions metric-range-actions">
+        <button class="ghost" on:click={() => setMetricRange("24h")}>24小时</button>
+        <button class="ghost" on:click={() => setMetricRange("7d")}>7天</button>
+        <button class="ghost" on:click={() => setMetricRange("30d")}>30天</button>
+        <button class="ghost icon-text" on:click={loadMetrics}><RefreshCw size={15}/>查询</button>
+      </div>
+    </div>
+    <div class="metric-query-row">
+      <label>开始时间<input type="datetime-local" step="1" bind:value={metricFrom} /></label>
+      <label>结束时间<input type="datetime-local" step="1" bind:value={metricTo} /></label>
+    </div>
+    {#if metricError}<div class="inline-error">{metricError}</div>{/if}
+    {#if metricPoints.length === 0}
+      <div class="empty-state trend-empty"><strong>暂无历史指标</strong><p>增量同步产生新事务后，会按分钟写入趋势数据。</p></div>
+    {:else}
+      <div class="trend-grid">
+        <div class="trend-card">
+          <div class="trend-card-head"><strong>同步延迟</strong><span>峰值 {delayText(maxDelay)}</span></div>
+          <svg viewBox="0 0 600 160" class="trend-chart" role="img" aria-label="同步延迟趋势">
+            <line x1="24" y1="138" x2="576" y2="138" />
+            <line x1="24" y1="30" x2="24" y2="138" />
+            <polyline points={delayPolyline} />
+          </svg>
+        </div>
+        <div class="trend-card">
+          <div class="trend-card-head"><strong>行数变化</strong><span>峰值 {compactNumber(maxRows)} 行</span></div>
+          <svg viewBox="0 0 600 160" class="trend-chart bar-chart" role="img" aria-label="增改删读取行数">
+            <line x1="24" y1="138" x2="576" y2="138" />
+            {#each metricPoints as point, index}
+              {@const total = metricRowTotal(point)}
+              {@const x = chartX(index) - 3}
+              {@const readH = (Number(point.read_rows || 0) * 108) / maxRows}
+              {@const insertH = (Number(point.insert_rows || 0) * 108) / maxRows}
+              {@const updateH = (Number(point.update_rows || 0) * 108) / maxRows}
+              {@const deleteH = (Number(point.delete_rows || 0) * 108) / maxRows}
+              {#if total > 0}
+                <rect class="read" x={x} y={138 - readH} width="6" height={readH} />
+                <rect class="insert" x={x} y={138 - readH - insertH} width="6" height={insertH} />
+                <rect class="update" x={x} y={138 - readH - insertH - updateH} width="6" height={updateH} />
+                <rect class="delete" x={x} y={138 - readH - insertH - updateH - deleteH} width="6" height={deleteH} />
+              {/if}
+            {/each}
+          </svg>
+          <div class="trend-legend"><span class="read">读取</span><span class="insert">新增</span><span class="update">更新</span><span class="delete">删除</span></div>
+        </div>
+      </div>
+      <div class="trend-foot">范围：{metricTime(metricPoints[0]?.time)} 至 {metricTime(metricPoints[metricPoints.length - 1]?.time)}</div>
+    {/if}
+  </section>
   <section class="workspace-panel detail-section"><div class="card-header"><div><h2>同步进度</h2><p>新增表会先独立初始化并追平主链路，再自动合并。</p></div></div>
     <table class="data-table"><thead><tr><th>源表</th><th>目标表</th><th>阶段</th><th>初始化进度</th><th>已初始化 / 总行数</th><th>说明</th></tr></thead><tbody>
       {#each task.task_tables || [] as table}<tr><td>{table.source_table}</td><td>{table.target_table}</td><td><span class={`pill ${table.sync_state === "failed" ? "danger" : table.sync_state === "active" ? "success" : "muted"}`}>{stateText(table.sync_state)}</span></td><td><div class="progress-cell"><div class="progress-track"><span style={`width:${Math.min(100, table.progress_percent || 0)}%`}></span></div><strong>{(table.progress_percent || 0).toFixed(1)}%</strong></div></td><td>{table.snapshot_processed || 0} / {table.snapshot_total || 0}</td><td>{table.progress_message || "-"}</td></tr>{/each}

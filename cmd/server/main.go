@@ -122,6 +122,7 @@ func main() {
 	syncGroup.GET("/tasks", syncHandler.ListTasks)
 	syncGroup.GET("/tasks/:id", syncHandler.GetTask)
 	syncGroup.GET("/tasks/:id/logs", syncHandler.GetTaskLogs)
+	syncGroup.GET("/tasks/:id/metrics", syncHandler.GetTaskMetrics)
 	syncGroup.GET("/tasks/:id/repair/jobs", syncHandler.ListRepairJobs)
 	syncGroup.GET("/repair/jobs/:job_id/diffs", syncHandler.ListRepairDiffs)
 	syncGroup.GET("/logs", syncHandler.ListLogs)

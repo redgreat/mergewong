@@ -356,6 +356,26 @@ func (h *SyncHandler) GetTaskLogs(c *gin.Context) {
 	})
 }
 
+func (h *SyncHandler) GetTaskMetrics(c *gin.Context) {
+	id, _ := strconv.ParseUint(c.Param("id"), 10, 32)
+	from, err := parseMetricTime(c.Query("from"))
+	if err != nil {
+		utils.BadRequest(c, "开始时间格式错误")
+		return
+	}
+	to, err := parseMetricTime(c.Query("to"))
+	if err != nil {
+		utils.BadRequest(c, "结束时间格式错误")
+		return
+	}
+	points, err := h.syncService.GetTaskMetricHistory(uint(id), from, to)
+	if err != nil {
+		utils.InternalServerError(c, "获取任务指标失败: "+err.Error())
+		return
+	}
+	utils.Success(c, points)
+}
+
 func (h *SyncHandler) ListLogs(c *gin.Context) {
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
 	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "10"))
@@ -444,6 +464,23 @@ func parseRepairTime(value string) (time.Time, error) {
 		return parsed, nil
 	}
 	if parsed, err := time.ParseInLocation("2006-01-02 15:04", value, time.Local); err == nil {
+		return parsed, nil
+	}
+	return time.ParseInLocation("2006-01-02 15:04:05", value, time.Local)
+}
+
+func parseMetricTime(value string) (time.Time, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return time.Time{}, nil
+	}
+	if parsed, err := time.Parse(time.RFC3339, value); err == nil {
+		return parsed, nil
+	}
+	if parsed, err := time.ParseInLocation("2006-01-02T15:04", value, time.Local); err == nil {
+		return parsed, nil
+	}
+	if parsed, err := time.ParseInLocation("2006-01-02T15:04:05", value, time.Local); err == nil {
 		return parsed, nil
 	}
 	return time.ParseInLocation("2006-01-02 15:04:05", value, time.Local)
