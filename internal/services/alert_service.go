@@ -3,10 +3,10 @@
 // 创建人: redgreat
 //
 // 预警策略：
-//   - 只按同步延迟阈值触发，不区分暂停、停止或追数延迟原因
+//   - 只在增量链路运行中按同步延迟阈值触发
 //   - 延迟超限后立即提醒一次，之后分别间隔 1 小时、3 小时、6 小时再提醒
 //   - 第 4 次提醒后不再重复提醒，直到延迟恢复到阈值内并重置状态
-//   - 全量初始化失败不发送预警；增量链路失败后按延迟阈值触发预警
+//   - 全量初始化、暂停、停止、完成、失败、待预检查均不发送任务延迟预警
 package services
 
 import (
@@ -124,6 +124,11 @@ func (s *AlertService) CheckTaskAlerts(ctx context.Context) error {
 			_ = s.ResolveTaskAlertSilent(task.ID, "delay")
 			continue
 		}
+		if !taskAlertEligible(task) {
+			_ = s.ResolveTaskAlertSilent(task.ID, "delay")
+			_ = s.ResolveTaskAlertSilent(task.ID, "stopped")
+			continue
+		}
 		threshold := int64(task.AlertDelaySeconds)
 		delay := taskCurrentDelaySeconds(task, now)
 		if threshold > 0 && delay >= threshold {
@@ -138,26 +143,16 @@ func (s *AlertService) CheckTaskAlerts(ctx context.Context) error {
 	return nil
 }
 
+func taskAlertEligible(task *models.SyncTask) bool {
+	if task.SyncType == "full" {
+		return false
+	}
+	return task.RuntimeStatus == "catching_up" || task.RuntimeStatus == "cdc_running"
+}
+
 func taskCurrentDelaySeconds(task *models.SyncTask, now time.Time) int64 {
-	if task.SyncType == "full" || task.RuntimeStatus == "initializing" {
+	if !taskAlertEligible(task) {
 		return 0
-	}
-	if task.RuntimeStatus == "failed" {
-		if strings.Contains(task.LastRunMessage, "全量初始化失败") {
-			return 0
-		}
-		if task.LastRunAt != nil {
-			return int64(now.Sub(*task.LastRunAt).Seconds())
-		}
-		return 0
-	}
-	if task.RuntimeStatus == "paused" || task.RuntimeStatus == "stopped" {
-		if task.LastSuccessAt != nil {
-			return int64(now.Sub(*task.LastSuccessAt).Seconds())
-		}
-		if task.LastRunAt != nil {
-			return int64(now.Sub(*task.LastRunAt).Seconds())
-		}
 	}
 	return task.DelaySeconds
 }

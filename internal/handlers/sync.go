@@ -243,8 +243,8 @@ func (h *SyncHandler) DeleteTask(c *gin.Context) {
 		utils.Error(c, 404, "任务不存在")
 		return
 	}
-	if task.RuntimeStatus != "paused" && task.RuntimeStatus != "stopped" && task.RuntimeStatus != "completed" {
-		utils.BadRequest(c, "任务必须暂停、停止或完成后才能删除")
+	if isTaskRunning(task.RuntimeStatus) {
+		utils.BadRequest(c, "任务运行中不能删除，请先暂停或等待任务停止")
 		return
 	}
 
@@ -257,6 +257,10 @@ func (h *SyncHandler) DeleteTask(c *gin.Context) {
 	h.syncService.RecordTaskEvent(task, "task_deleted", "config", "success", "同步任务已删除", "", 0, 0)
 
 	utils.SuccessWithMessage(c, "删除成功", nil)
+}
+
+func isTaskRunning(status string) bool {
+	return status == "initializing" || status == "catching_up" || status == "cdc_running"
 }
 
 func (h *SyncHandler) PauseTask(c *gin.Context) {

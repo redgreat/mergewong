@@ -18,12 +18,13 @@ func TestTaskCurrentDelaySeconds(t *testing.T) {
 		task models.SyncTask
 		want int64
 	}{
-		{name: "cdc delay", task: models.SyncTask{SyncType: "full_cdc", RuntimeStatus: "cdc_running", DelaySeconds: 42}, want: 42},
-		{name: "paused from success", task: models.SyncTask{SyncType: "full_cdc", RuntimeStatus: "paused", LastSuccessAt: &lastSuccess, DelaySeconds: 42}, want: 7200},
-		{name: "stopped from last run", task: models.SyncTask{SyncType: "full_cdc", RuntimeStatus: "stopped", LastRunAt: &lastRun}, want: 1800},
-		{name: "initializing ignored", task: models.SyncTask{SyncType: "full_cdc", RuntimeStatus: "initializing", PhaseStartedAt: &started}, want: 0},
-		{name: "full failure ignored", task: models.SyncTask{SyncType: "full_cdc", RuntimeStatus: "failed", LastRunAt: &lastRun, LastRunMessage: "全量初始化失败: bad"}, want: 0},
-		{name: "cdc failure elapsed", task: models.SyncTask{SyncType: "full_cdc", RuntimeStatus: "failed", LastRunAt: &lastRun, LastRunMessage: "binlog disconnected"}, want: 1800},
+		{name: "cdc running delay", task: models.SyncTask{SyncType: "full_cdc", RuntimeStatus: "cdc_running", DelaySeconds: 42}, want: 42},
+		{name: "catching up delay", task: models.SyncTask{SyncType: "full_cdc", RuntimeStatus: "catching_up", DelaySeconds: 35}, want: 35},
+		{name: "paused ignored", task: models.SyncTask{SyncType: "full_cdc", RuntimeStatus: "paused", LastSuccessAt: &lastSuccess, DelaySeconds: 42}, want: 0},
+		{name: "stopped ignored", task: models.SyncTask{SyncType: "full_cdc", RuntimeStatus: "stopped", LastRunAt: &lastRun, DelaySeconds: 42}, want: 0},
+		{name: "initializing ignored", task: models.SyncTask{SyncType: "full_cdc", RuntimeStatus: "initializing", PhaseStartedAt: &started, DelaySeconds: 42}, want: 0},
+		{name: "failed ignored", task: models.SyncTask{SyncType: "full_cdc", RuntimeStatus: "failed", LastRunAt: &lastRun, LastRunMessage: "binlog disconnected", DelaySeconds: 42}, want: 0},
+		{name: "full sync ignored", task: models.SyncTask{SyncType: "full", RuntimeStatus: "cdc_running", DelaySeconds: 42}, want: 0},
 	}
 
 	for _, tt := range tests {

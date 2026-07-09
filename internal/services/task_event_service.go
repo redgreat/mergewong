@@ -56,6 +56,7 @@ func (s *SyncService) PauseTask(taskID uint) error {
 	if err := s.UpdateTask(taskID, map[string]interface{}{"runtime_status": "paused", "last_run_status": "paused", "last_run_message": "任务已暂停"}); err != nil {
 		return err
 	}
+	_ = NewAlertService().ResolveTaskAlertSilent(taskID, "delay")
 	s.RecordTaskEvent(task, "task_paused", "control", "success", "任务已暂停", "", 0, 0)
 	return nil
 }
@@ -80,8 +81,8 @@ func (s *SyncService) UpdateBinlogPosition(taskID uint, file string, position ui
 	if err != nil {
 		return err
 	}
-	if task.RuntimeStatus != "paused" {
-		return fmt.Errorf("只有暂停状态才能修改 Binlog 位点")
+	if task.RuntimeStatus != "paused" && task.RuntimeStatus != "stopped" && task.RuntimeStatus != "failed" {
+		return fmt.Errorf("只有暂停、停止或失败状态才能修改 Binlog 位点")
 	}
 	if task.SyncType != "cdc" && task.SyncType != "full_cdc" {
 		return fmt.Errorf("该任务不是 Binlog CDC 任务")

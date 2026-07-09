@@ -12,13 +12,15 @@
 
   const statusText = (task) => ({ pending: "待预检查", initializing: "全量初始化", catching_up: "增量追数", cdc_running: "增量同步中", paused: "暂停", stopped: "停止", completed: "完成", failed: "失败" }[task.validation_status === "pending" ? "pending" : task.runtime_status] || "停止");
   const statusClass = (task) => task.runtime_status === "failed" ? "danger" : ["initializing", "catching_up", "cdc_running"].includes(task.runtime_status) ? "success" : "muted";
+  const runningStates = ["initializing", "catching_up", "cdc_running"];
   const delayText = (seconds) => seconds == null ? "-" : `${(seconds * 1000).toLocaleString()} ms`;
   const speedText = (speed) => {
     const value = Number(speed || 0);
     if (value <= 0) return "0r/s";
     return `${value >= 1000 ? (value / 1000).toFixed(1) + "k" : value.toFixed(1)}r/s`;
   };
-  const canDelete = (task) => ["paused", "stopped", "completed"].includes(task.runtime_status);
+  const canDelete = (task) => !runningStates.includes(task.runtime_status);
+  const canEditCheckpoint = (task) => task.sync_type !== "full" && ["paused", "stopped", "failed"].includes(task.runtime_status);
 
   function openCheckpoint(task) {
     checkpointTask = task;
@@ -47,10 +49,10 @@
           <td><button class={`status-link ${statusClass(task)}`} class:clickable={task.runtime_status === "failed"} disabled={task.runtime_status !== "failed"} on:click={() => (detailTask = task)}>{#if task.runtime_status === "failed"}<CircleAlert size={14} />{/if}{statusText(task)}</button></td>
           <td>{delayText(task.delay_seconds)}</td><td>{speedText(task.rows_per_second)}</td><td>{task.alert_channel?.name || "-"}</td>
           {#if canManage}<td><div class="task-operation"><button class="icon-button" aria-label={`操作 ${task.name}`} on:click|stopPropagation={() => (menuTaskId = menuTaskId === task.id ? null : task.id)}><EllipsisVertical size={17} /></button>{#if menuTaskId === task.id}<div class="operation-menu">
-            {#if ["initializing", "catching_up", "cdc_running"].includes(task.runtime_status)}<button on:click={() => { menuTaskId = null; onPause(task); }}>暂停</button>{:else}<button disabled={task.validation_status !== "passed"} on:click={() => { menuTaskId = null; onResume(task); }}>开始</button>{/if}
+            {#if runningStates.includes(task.runtime_status)}<button on:click={() => { menuTaskId = null; onPause(task); }}>暂停</button>{:else}<button disabled={task.validation_status !== "passed"} on:click={() => { menuTaskId = null; onResume(task); }}>开始</button>{/if}
             <button on:click={() => { menuTaskId = null; onEdit(task); }}>修改同步对象</button>
 			<button on:click={() => { menuTaskId = null; onDetail(task); }}>详情</button>
-            <button disabled={task.runtime_status !== "paused" || task.sync_type === "full"} on:click={() => openCheckpoint(task)}>修改 Binlog 位点</button>
+            <button disabled={!canEditCheckpoint(task)} on:click={() => openCheckpoint(task)}>修改 Binlog 位点</button>
             <button class="danger-text" disabled={!canDelete(task)} on:click={() => { deleteTask = task; menuTaskId = null; }}>删除</button>
           </div>{/if}</div></td>{/if}
         </tr>
