@@ -70,6 +70,9 @@ func readUnixCPUSample() (unixCPUSample, error) {
 }
 
 func systemMemory() (memorySnapshot, error) {
+	if snapshot, err := readProcMeminfo(); err == nil {
+		return snapshot, nil
+	}
 	var info unix.Sysinfo_t
 	if err := unix.Sysinfo(&info); err != nil {
 		return memorySnapshot{}, err
@@ -80,7 +83,43 @@ func systemMemory() (memorySnapshot, error) {
 	}
 	total := info.Totalram * unit
 	free := info.Freeram * unit
-	return memorySnapshot{Total: total, Used: total - free}, nil
+	return memorySnapshot{Total: total, Used: total - free, Available: free}, nil
+}
+
+func readProcMeminfo() (memorySnapshot, error) {
+	content, err := os.ReadFile("/proc/meminfo")
+	if err != nil {
+		return memorySnapshot{}, err
+	}
+	values := map[string]uint64{}
+	for _, line := range strings.Split(string(content), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) < 2 {
+			continue
+		}
+		key := strings.TrimSuffix(fields[0], ":")
+		value, parseErr := strconv.ParseUint(fields[1], 10, 64)
+		if parseErr != nil {
+			continue
+		}
+		values[key] = value * 1024
+	}
+	total := values["MemTotal"]
+	if total == 0 {
+		return memorySnapshot{}, fmt.Errorf("无法读取内存总量")
+	}
+	available := values["MemAvailable"]
+	if available == 0 {
+		available = values["MemFree"] + values["Buffers"] + values["Cached"] + values["SReclaimable"] - values["Shmem"]
+	}
+	if available > total {
+		available = total
+	}
+	return memorySnapshot{
+		Total:     total,
+		Used:      total - available,
+		Available: available,
+	}, nil
 }
 
 func diskUsage(path string) (diskSnapshot, error) {

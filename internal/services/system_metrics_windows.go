@@ -81,7 +81,7 @@ func systemMemory() (memorySnapshot, error) {
 	if r1 == 0 {
 		return memorySnapshot{}, err
 	}
-	return memorySnapshot{Total: status.TotalPhys, Used: status.TotalPhys - status.AvailPhys}, nil
+	return memorySnapshot{Total: status.TotalPhys, Used: status.TotalPhys - status.AvailPhys, Available: status.AvailPhys}, nil
 }
 
 func diskUsage(path string) (diskSnapshot, error) {

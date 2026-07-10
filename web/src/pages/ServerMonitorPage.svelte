@@ -67,7 +67,7 @@
   {#if error}<div class="inline-error">{error}</div>{/if}
   <div class="metric-grid server-metric-grid">
     <div class="metric-card"><span><Cpu size={16}/>CPU</span><strong>{fmtPercent(metrics?.cpu_percent)}</strong><small>{metrics?.num_cpu || 0} 核</small></div>
-    <div class="metric-card"><span><MemoryStick size={16}/>内存</span><strong>{fmtPercent(metrics?.memory_percent)}</strong><small>{fmtBytes(metrics?.memory_used)} / {fmtBytes(metrics?.memory_total)}</small></div>
+    <div class="metric-card"><span><MemoryStick size={16}/>内存</span><strong>{fmtPercent(metrics?.memory_percent)}</strong><small>{fmtBytes(metrics?.memory_used)} / {fmtBytes(metrics?.memory_total)}，可用 {fmtBytes(metrics?.memory_available)}</small></div>
     <div class="metric-card"><span><HardDrive size={16}/>磁盘</span><strong>{fmtPercent(metrics?.disk_percent)}</strong><small>{fmtBytes(metrics?.disk_used)} / {fmtBytes(metrics?.disk_total)}</small></div>
     <div class="metric-card"><span><Database size={16}/>服务进程</span><strong>{metrics?.goroutines || 0}</strong><small>进程内存 {fmtBytes(metrics?.process_memory)}</small></div>
   </div>

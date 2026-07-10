@@ -18,18 +18,19 @@ type ServerMonitorService struct {
 }
 
 type ServerMetrics struct {
-	CPUPercent    float64             `json:"cpu_percent"`
-	MemoryPercent float64             `json:"memory_percent"`
-	MemoryTotal   uint64              `json:"memory_total"`
-	MemoryUsed    uint64              `json:"memory_used"`
-	DiskPercent   float64             `json:"disk_percent"`
-	DiskTotal     uint64              `json:"disk_total"`
-	DiskUsed      uint64              `json:"disk_used"`
-	ProcessMemory uint64              `json:"process_memory"`
-	Goroutines    int                 `json:"goroutines"`
-	NumCPU        int                 `json:"num_cpu"`
-	DBPools       []DatabasePoolStats `json:"db_pools"`
-	CollectedAt   time.Time           `json:"collected_at"`
+	CPUPercent      float64             `json:"cpu_percent"`
+	MemoryPercent   float64             `json:"memory_percent"`
+	MemoryTotal     uint64              `json:"memory_total"`
+	MemoryUsed      uint64              `json:"memory_used"`
+	MemoryAvailable uint64              `json:"memory_available"`
+	DiskPercent     float64             `json:"disk_percent"`
+	DiskTotal       uint64              `json:"disk_total"`
+	DiskUsed        uint64              `json:"disk_used"`
+	ProcessMemory   uint64              `json:"process_memory"`
+	Goroutines      int                 `json:"goroutines"`
+	NumCPU          int                 `json:"num_cpu"`
+	DBPools         []DatabasePoolStats `json:"db_pools"`
+	CollectedAt     time.Time           `json:"collected_at"`
 }
 
 type DatabasePoolStats struct {
@@ -60,18 +61,19 @@ func (s *ServerMonitorService) Metrics() (*ServerMetrics, error) {
 	var ms runtime.MemStats
 	runtime.ReadMemStats(&ms)
 	return &ServerMetrics{
-		CPUPercent:    cpuPercent,
-		MemoryPercent: percent(mem.Used, mem.Total),
-		MemoryTotal:   mem.Total,
-		MemoryUsed:    mem.Used,
-		DiskPercent:   percent(disk.Used, disk.Total),
-		DiskTotal:     disk.Total,
-		DiskUsed:      disk.Used,
-		ProcessMemory: ms.Alloc,
-		Goroutines:    runtime.NumGoroutine(),
-		NumCPU:        runtime.NumCPU(),
-		DBPools:       collectDatabasePools(),
-		CollectedAt:   time.Now(),
+		CPUPercent:      cpuPercent,
+		MemoryPercent:   percent(mem.Used, mem.Total),
+		MemoryTotal:     mem.Total,
+		MemoryUsed:      mem.Used,
+		MemoryAvailable: mem.Available,
+		DiskPercent:     percent(disk.Used, disk.Total),
+		DiskTotal:       disk.Total,
+		DiskUsed:        disk.Used,
+		ProcessMemory:   ms.Alloc,
+		Goroutines:      runtime.NumGoroutine(),
+		NumCPU:          runtime.NumCPU(),
+		DBPools:         collectDatabasePools(),
+		CollectedAt:     time.Now(),
 	}, nil
 }
 
@@ -184,8 +186,9 @@ func percent(used, total uint64) float64 {
 }
 
 type memorySnapshot struct {
-	Total uint64
-	Used  uint64
+	Total     uint64
+	Used      uint64
+	Available uint64
 }
 
 type diskSnapshot struct {
