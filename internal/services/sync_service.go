@@ -34,6 +34,9 @@ func (s *SyncService) CreateTask(task *models.SyncTask) error {
 	if err := validateTaskAlertSettings(task); err != nil {
 		return err
 	}
+	if err := validateTaskExecutionSettings(task); err != nil {
+		return err
+	}
 	return s.systemDB.Create(task).Error
 }
 
@@ -56,6 +59,9 @@ func (s *SyncService) CreateTaskWithTables(task *models.SyncTask, tables []model
 		return err
 	}
 	if err := validateTaskAlertSettings(task); err != nil {
+		return err
+	}
+	if err := validateTaskExecutionSettings(task); err != nil {
 		return err
 	}
 	return s.systemDB.Transaction(func(tx *gorm.DB) error {
@@ -232,6 +238,39 @@ func validateTaskAlertSettings(task *models.SyncTask) error {
 		return fmt.Errorf("预警时间不能小于 0")
 	}
 	return nil
+}
+
+func validateTaskExecutionSettings(task *models.SyncTask) error {
+	if task.SyncBatchSize < 0 {
+		return fmt.Errorf("批大小不能小于 0")
+	}
+	if task.SnapshotTableWorkers < 0 {
+		return fmt.Errorf("表并发不能小于 0")
+	}
+	if task.SnapshotShardWorkers < 0 {
+		return fmt.Errorf("分片并发不能小于 0")
+	}
+	if task.SyncBatchSize > 0 && task.SyncBatchSize < 100 {
+		return fmt.Errorf("批大小至少为 100，或填写 0 使用自动配置")
+	}
+	if task.SyncBatchSize > 20000 {
+		return fmt.Errorf("批大小不能超过 20000")
+	}
+	if task.SnapshotTableWorkers > 32 {
+		return fmt.Errorf("表并发不能超过 32")
+	}
+	if task.SnapshotShardWorkers > 32 {
+		return fmt.Errorf("分片并发不能超过 32")
+	}
+	return nil
+}
+
+func (s *SyncService) ValidateTaskExecutionConfig(batchSize, tableWorkers, shardWorkers int) error {
+	return validateTaskExecutionSettings(&models.SyncTask{
+		SyncBatchSize:        batchSize,
+		SnapshotTableWorkers: tableWorkers,
+		SnapshotShardWorkers: shardWorkers,
+	})
 }
 
 func (s *SyncService) ValidateAlertChannelID(id uint) error {

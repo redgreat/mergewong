@@ -82,6 +82,9 @@ type SyncTask struct {
 	AlertCooldownMinutes int                `gorm:"not null;default:30" json:"alert_cooldown_minutes"` // 预警重复间隔（分钟）
 	ValidationStatus     string             `gorm:"size:20;not null;default:legacy" json:"validation_status"`
 	RuntimeStatus        string             `gorm:"size:30;not null;default:stopped;index" json:"runtime_status"`
+	SyncBatchSize        int                `gorm:"not null;default:0" json:"sync_batch_size"`
+	SnapshotTableWorkers int                `gorm:"not null;default:0" json:"snapshot_table_workers"`
+	SnapshotShardWorkers int                `gorm:"not null;default:0" json:"snapshot_shard_workers"`
 	RowsProcessed        int64              `gorm:"not null;default:0" json:"rows_processed"`
 	RowsPerSecond        float64            `gorm:"not null;default:0" json:"rows_per_second"`
 	DelaySeconds         int64              `gorm:"not null;default:0" json:"delay_seconds"`

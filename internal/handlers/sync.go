@@ -43,6 +43,9 @@ type CreateTaskRequest struct {
 	AlertStoppedMinutes  int                `json:"alert_stopped_minutes"`
 	AlertOnError         bool               `json:"alert_on_error"`
 	AlertCooldownMinutes int                `json:"alert_cooldown_minutes"`
+	SyncBatchSize        int                `json:"sync_batch_size"`
+	SnapshotTableWorkers int                `json:"snapshot_table_workers"`
+	SnapshotShardWorkers int                `json:"snapshot_shard_workers"`
 }
 
 type TaskTableRequest struct {
@@ -83,6 +86,9 @@ func (h *SyncHandler) CreateTask(c *gin.Context) {
 		AlertStoppedMinutes:  0,
 		AlertOnError:         true,
 		AlertCooldownMinutes: 0,
+		SyncBatchSize:        req.SyncBatchSize,
+		SnapshotTableWorkers: req.SnapshotTableWorkers,
+		SnapshotShardWorkers: req.SnapshotShardWorkers,
 		Status:               1,
 		UserID:               userID.(uint),
 	}
@@ -149,6 +155,9 @@ type UpdateTaskRequest struct {
 	AlertStoppedMinutes  *int               `json:"alert_stopped_minutes"`
 	AlertOnError         *bool              `json:"alert_on_error"`
 	AlertCooldownMinutes *int               `json:"alert_cooldown_minutes"`
+	SyncBatchSize        int                `json:"sync_batch_size"`
+	SnapshotTableWorkers int                `json:"snapshot_table_workers"`
+	SnapshotShardWorkers int                `json:"snapshot_shard_workers"`
 	Tables               []TaskTableRequest `json:"tables"`
 }
 
@@ -190,11 +199,18 @@ func (h *SyncHandler) UpdateTask(c *gin.Context) {
 		"alert_stopped_minutes":  0,
 		"alert_on_error":         true,
 		"alert_cooldown_minutes": 0,
+		"sync_batch_size":        req.SyncBatchSize,
+		"snapshot_table_workers": req.SnapshotTableWorkers,
+		"snapshot_shard_workers": req.SnapshotShardWorkers,
 	}
 	if alertChannelID == nil {
 		updates["alert_channel_id"] = nil
 	} else {
 		updates["alert_channel_id"] = *alertChannelID
+	}
+	if err := h.syncService.ValidateTaskExecutionConfig(req.SyncBatchSize, req.SnapshotTableWorkers, req.SnapshotShardWorkers); err != nil {
+		utils.BadRequest(c, err.Error())
+		return
 	}
 
 	if err := h.syncService.UpdateTask(uint(id), updates); err != nil {
@@ -319,8 +335,10 @@ func (h *SyncHandler) PrecheckTask(c *gin.Context) {
 		task, err := h.syncService.GetTask(uint(id))
 		if err == nil {
 			_ = scheduler.GetScheduler().RefreshTask(task)
-			if task.SyncType == "cdc" || task.SyncType == "full_cdc" {
-				_ = services.GetCDCManager().StartTask(task.ID)
+			if !isTaskRunning(task.RuntimeStatus) {
+				go func(taskID uint) {
+					_ = h.syncService.ExecuteTask(taskID)
+				}(task.ID)
 			}
 		}
 	}
@@ -329,7 +347,7 @@ func (h *SyncHandler) PrecheckTask(c *gin.Context) {
 		message := "任务预检查未通过"
 		if result.Passed {
 			status = "success"
-			message = "任务预检查通过"
+			message = "任务预检查通过并已自动开始"
 		}
 		h.syncService.RecordTaskEvent(task, "precheck", "precheck", status, message, "", 0, 0)
 	}

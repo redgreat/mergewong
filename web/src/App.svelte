@@ -89,7 +89,10 @@
     field_mappings: [],
     status: 1,
     alert_channel_id: "",
-    alert_delay_ms: 5000
+    alert_delay_ms: 5000,
+    sync_batch_size: 0,
+    snapshot_table_workers: 0,
+    snapshot_shard_workers: 0
   };
 
   let logs = [];
@@ -413,7 +416,10 @@
       field_mappings: [],
       status: 1,
       alert_channel_id: "",
-      alert_delay_ms: 5000
+      alert_delay_ms: 5000,
+      sync_batch_size: 0,
+      snapshot_table_workers: 0,
+      snapshot_shard_workers: 0
     };
   }
 
@@ -465,7 +471,10 @@
       field_mappings: Object.entries(task.field_mapping || {}).map(([source, target]) => ({ source, target })),
       status: task.status,
       alert_channel_id: task.alert_channel_id || "",
-      alert_delay_ms: (task.alert_delay_seconds || 0) * 1000
+      alert_delay_ms: (task.alert_delay_seconds || 0) * 1000,
+      sync_batch_size: task.sync_batch_size || 0,
+      snapshot_table_workers: task.snapshot_table_workers || 0,
+      snapshot_shard_workers: task.snapshot_shard_workers || 0
     };
   }
 
@@ -501,6 +510,9 @@
         status: Number(taskForm.status),
         alert_channel_id: taskForm.alert_channel_id ? Number(taskForm.alert_channel_id) : 0,
         alert_delay_ms: Number(taskForm.alert_delay_ms) || 0,
+        sync_batch_size: Number(taskForm.sync_batch_size) || 0,
+        snapshot_table_workers: Number(taskForm.snapshot_table_workers) || 0,
+        snapshot_shard_workers: Number(taskForm.snapshot_shard_workers) || 0,
         alert_on_error: true
       };
 
@@ -529,7 +541,7 @@
         editingTaskId = createdTask.id;
       }
       taskPrecheckResult = await request(`/api/sync/tasks/${editingTaskId}/precheck`, { method: "POST", token });
-      setMessage(taskPrecheckResult.passed ? "任务预检查通过并已启用" : "任务已保存，但预检查存在阻断项", taskPrecheckResult.passed ? "info" : "error");
+      setMessage(taskPrecheckResult.passed ? "任务预检查通过并已自动开始" : "任务已保存，但预检查存在阻断项", taskPrecheckResult.passed ? "info" : "error");
       await loadTasks();
     } catch (error) {
       setMessage(error.message, "error");

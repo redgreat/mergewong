@@ -30,6 +30,9 @@
   $: stepOneReady = !!(form.name?.trim() && form.source_db && form.target_db);
   $: stepTwoReady = !!form.table_mappings?.length && form.table_mappings.every((table) => table.source_table?.trim() && table.target_table?.trim());
   $: filteredTables = availableTables.filter((table) => table.toLowerCase().includes(tableSearch.trim().toLowerCase()));
+  $: effectiveBatchSize = Number(form.sync_batch_size || 0);
+  $: effectiveTableWorkers = Number(form.snapshot_table_workers || 0);
+  $: effectiveShardWorkers = Number(form.snapshot_shard_workers || 0);
   $: if (open && step === 2 && form.source_db && loadedConnection !== form.source_db) loadSourceTables();
 
   async function loadSourceTables() {
@@ -321,6 +324,30 @@
             <div class="help-wrap"><button class="help-button" type="button" aria-label="查看运行方式说明" on:click|stopPropagation={() => toggleHelp("schedule")}><CircleHelp size={16} /></button>{#if helpOpen === "schedule"}<div class="help-popover">全量+CDC 会先记录 Binlog 位点，再初始化存量数据，最后从该位点持续消费增删改事件；无需 Cron。</div>{/if}</div>
           </div>
           <div class="mode-summary"><strong>{form.sync_type === "full_cdc" ? "全量初始化后持续同步" : form.sync_type === "cdc" ? "从当前位点开始持续同步" : "执行一次全量初始化"}</strong></div>
+
+          <div class="wizard-section-title alert-title">
+            <h4>初始化资源策略</h4>
+            <div class="help-wrap"><button class="help-button" type="button" aria-label="查看初始化资源策略说明" on:click|stopPropagation={() => toggleHelp("tuning")}><CircleHelp size={16} /></button>{#if helpOpen === "tuning"}<div class="help-popover">填写 0 表示自动按服务器规格选择。4C8G 建议保持自动，或手动设置为批大小 1000、表并发 1、分片并发 1，减少 Docker 被打满的风险。</div>{/if}</div>
+          </div>
+          <div class="resource-summary">
+            <div class="resource-card"><strong>{effectiveBatchSize || "自动"}</strong><span>单批读取/写入行数</span></div>
+            <div class="resource-card"><strong>{effectiveTableWorkers || "自动"}</strong><span>任务内并行初始化表数</span></div>
+            <div class="resource-card"><strong>{effectiveShardWorkers || "自动"}</strong><span>单表分片并行数</span></div>
+          </div>
+          <div class="form-grid wizard-grid compact-grid resource-grid">
+            <label>批大小
+              <input type="number" min="0" max="20000" bind:value={form.sync_batch_size} placeholder="0 表示自动" />
+              <small>建议 1000，填写 0 使用系统自动配置</small>
+            </label>
+            <label>表并发
+              <input type="number" min="0" max="32" bind:value={form.snapshot_table_workers} placeholder="0 表示自动" />
+              <small>同一任务同时初始化的表数量</small>
+            </label>
+            <label>分片并发
+              <input type="number" min="0" max="32" bind:value={form.snapshot_shard_workers} placeholder="0 表示自动" />
+              <small>单表拆分后并行读取的分片数</small>
+            </label>
+          </div>
 
           <div class="wizard-section-title alert-title">
             <h4>预警策略</h4>

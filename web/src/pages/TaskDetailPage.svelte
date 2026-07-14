@@ -152,6 +152,12 @@
   function selectRowsPoint(index) {
     activeRowsIndex = index;
   }
+  function handleChartKeydown(event, selectPoint, index) {
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      selectPoint(index);
+    }
+  }
   async function refreshDetail(refreshMetrics = true) {
     if (detailRefreshing) return;
     detailRefreshing = true;
@@ -303,7 +309,7 @@
             <polyline points={delayPolyline} />
             {#each metricPoints as point, index}
               <circle class:active-point={index === resolveActiveIndex(activeDelayIndex)} class="trend-point" cx={chartX(index)} cy={chartY(Number(point.delay_seconds || 0), maxDelay)} r="4" />
-              <rect class="trend-hit" x={chartX(index) - hitWidth() / 2} y={chartTop} width={hitWidth()} height={chartBottom - chartTop + 16} on:mouseenter={() => selectDelayPoint(index)} on:click={() => selectDelayPoint(index)} />
+              <rect class="trend-hit" x={chartX(index) - hitWidth() / 2} y={chartTop} width={hitWidth()} height={chartBottom - chartTop + 16} role="button" tabindex="0" aria-label={`查看 ${metricTime(point.time)} 的延迟详情`} on:mouseenter={() => selectDelayPoint(index)} on:click={() => selectDelayPoint(index)} on:keydown={(event) => handleChartKeydown(event, selectDelayPoint, index)} />
             {/each}
             {#each xAxisLabels as label}
               <text class="axis-label axis-time" x={chartX(label.index)} y="150" text-anchor="middle">{label.label}</text>
@@ -335,7 +341,7 @@
                 <rect class:active-bar={index === resolveActiveIndex(activeRowsIndex)} class="update" x={x} y={chartBottom - readH - insertH - updateH} width={barWidth()} height={updateH} />
                 <rect class:active-bar={index === resolveActiveIndex(activeRowsIndex)} class="delete" x={x} y={chartBottom - readH - insertH - updateH - deleteH} width={barWidth()} height={deleteH} />
               {/if}
-              <rect class="trend-hit" x={chartX(index) - hitWidth() / 2} y={chartTop} width={hitWidth()} height={chartBottom - chartTop + 16} on:mouseenter={() => selectRowsPoint(index)} on:click={() => selectRowsPoint(index)} />
+              <rect class="trend-hit" x={chartX(index) - hitWidth() / 2} y={chartTop} width={hitWidth()} height={chartBottom - chartTop + 16} role="button" tabindex="0" aria-label={`查看 ${metricTime(point.time)} 的行数详情`} on:mouseenter={() => selectRowsPoint(index)} on:click={() => selectRowsPoint(index)} on:keydown={(event) => handleChartKeydown(event, selectRowsPoint, index)} />
             {/each}
             {#each xAxisLabels as label}
               <text class="axis-label axis-time" x={chartX(label.index)} y="150" text-anchor="middle">{label.label}</text>

@@ -3,6 +3,9 @@ package services
 import (
 	"errors"
 	"fmt"
+	"os"
+	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -21,6 +24,83 @@ const (
 var taskRunLocks sync.Map
 var ErrTaskPaused = errors.New("任务已暂停")
 var mysqlColumnNameCache sync.Map
+
+func snapshotBatchSize(task *models.SyncTask) int {
+	return currentSnapshotTuning(task).batchSize
+}
+
+func snapshotTableWorkers(task *models.SyncTask) int {
+	return currentSnapshotTuning(task).tableWorkers
+}
+
+func snapshotShardWorkers(task *models.SyncTask) int {
+	return currentSnapshotTuning(task).shardWorkers
+}
+
+func currentSnapshotTuning(task *models.SyncTask) snapshotTuning {
+	tuning := snapshotTuning{
+		batchSize:    defaultSyncBatchSize,
+		tableWorkers: defaultSnapshotTableWorker,
+		shardWorkers: defaultSnapshotShardWorker,
+	}
+	cpuCount := runtime.NumCPU()
+	memoryTotal := uint64(0)
+	if snapshot, err := systemMemory(); err == nil {
+		memoryTotal = snapshot.Total
+	}
+	switch {
+	case cpuCount <= 4 || (memoryTotal > 0 && memoryTotal <= 8*1024*1024*1024):
+		tuning.batchSize = 1000
+		tuning.tableWorkers = 1
+		tuning.shardWorkers = 1
+	case cpuCount <= 8 || (memoryTotal > 0 && memoryTotal <= 16*1024*1024*1024):
+		tuning.batchSize = 2000
+		tuning.tableWorkers = 2
+		tuning.shardWorkers = 2
+	}
+	tuning.batchSize = envPositiveInt("MERGEWONG_SYNC_BATCH_SIZE", tuning.batchSize)
+	tuning.tableWorkers = envPositiveInt("MERGEWONG_SNAPSHOT_TABLE_WORKERS", tuning.tableWorkers)
+	tuning.shardWorkers = envPositiveInt("MERGEWONG_SNAPSHOT_SHARD_WORKERS", tuning.shardWorkers)
+	if task != nil {
+		if task.SyncBatchSize > 0 {
+			tuning.batchSize = task.SyncBatchSize
+		}
+		if task.SnapshotTableWorkers > 0 {
+			tuning.tableWorkers = task.SnapshotTableWorkers
+		}
+		if task.SnapshotShardWorkers > 0 {
+			tuning.shardWorkers = task.SnapshotShardWorkers
+		}
+	}
+	if tuning.batchSize < 100 {
+		tuning.batchSize = 100
+	}
+	if tuning.tableWorkers < 1 {
+		tuning.tableWorkers = 1
+	}
+	if tuning.shardWorkers < 1 {
+		tuning.shardWorkers = 1
+	}
+	return tuning
+}
+
+func envPositiveInt(key string, fallback int) int {
+	value := strings.TrimSpace(os.Getenv(key))
+	if value == "" {
+		return fallback
+	}
+	number, err := strconv.Atoi(value)
+	if err != nil || number <= 0 {
+		return fallback
+	}
+	return number
+}
+
+type snapshotTuning struct {
+	batchSize    int
+	tableWorkers int
+	shardWorkers int
+}
 
 func acquireTaskRunLock(taskID uint) (func(), error) {
 	value, _ := taskRunLocks.LoadOrStore(taskID, &sync.Mutex{})
@@ -42,7 +122,7 @@ func (s *SyncService) syncValidatedTask(task *models.SyncTask) (int64, error) {
 	}
 	var total int64
 	var totalMu sync.Mutex
-	sem := make(chan struct{}, defaultSnapshotTableWorker)
+	sem := make(chan struct{}, snapshotTableWorkers(task))
 	errCh := make(chan error, len(task.TaskTables))
 	var wg sync.WaitGroup
 	for i := range task.TaskTables {
@@ -98,7 +178,7 @@ func (s *SyncService) syncValidatedTable(task *models.SyncTask, mapping *models.
 	if err := sourceDB.Table(mapping.SourceTable).Count(&sourceTotal).Error; err != nil {
 		return 0, err
 	}
-	shards, err := s.ensureSnapshotShards(sourceDB, mapping, sourceTotal)
+	shards, err := s.ensureSnapshotShards(task, sourceDB, mapping, sourceTotal)
 	if err != nil {
 		return 0, err
 	}
@@ -106,7 +186,7 @@ func (s *SyncService) syncValidatedTable(task *models.SyncTask, mapping *models.
 	_ = updateTaskTableProgress(s.systemDB, mapping.ID, map[string]interface{}{"sync_state": "initializing", "snapshot_total": sourceTotal, "progress_message": "正在全量初始化"})
 	var total atomic.Int64
 	total.Store(processed)
-	sem := make(chan struct{}, defaultSnapshotShardWorker)
+	sem := make(chan struct{}, snapshotShardWorkers(task))
 	errCh := make(chan error, len(shards))
 	var wg sync.WaitGroup
 	for i := range shards {
@@ -191,7 +271,7 @@ func (s *SyncService) syncSnapshotShard(task *models.SyncTask, mapping *models.S
 	}
 }
 
-func (s *SyncService) ensureSnapshotShards(db *gorm.DB, mapping *models.SyncTaskTable, sourceTotal int64) ([]models.SyncSnapshotShardCheckpoint, error) {
+func (s *SyncService) ensureSnapshotShards(task *models.SyncTask, db *gorm.DB, mapping *models.SyncTaskTable, sourceTotal int64) ([]models.SyncSnapshotShardCheckpoint, error) {
 	var shards []models.SyncSnapshotShardCheckpoint
 	if err := s.systemDB.Where("task_table_id = ?", mapping.ID).Order("shard_index ASC").Find(&shards).Error; err != nil {
 		return nil, err
@@ -199,8 +279,8 @@ func (s *SyncService) ensureSnapshotShards(db *gorm.DB, mapping *models.SyncTask
 	if len(shards) > 0 {
 		return shards, nil
 	}
-	shardCount := defaultSnapshotShardWorker
-	if sourceTotal < int64(defaultSyncBatchSize*2) {
+	shardCount := snapshotShardWorkers(task)
+	if sourceTotal < int64(snapshotBatchSize(task)*2) {
 		shardCount = 1
 	} else if sourceTotal < int64(shardCount) {
 		shardCount = int(sourceTotal)
@@ -285,7 +365,7 @@ func readMySQLBatch(task *models.SyncTask, mapping *models.SyncTaskTable, db *go
 		}
 		query += " ORDER BY " + pk
 	}
-	query += fmt.Sprintf(" LIMIT %d", defaultSyncBatchSize)
+	query += fmt.Sprintf(" LIMIT %d", snapshotBatchSize(task))
 	rows, err := db.Raw(query, params...).Rows()
 	if err != nil {
 		return nil, nil, "", "", err
@@ -352,7 +432,7 @@ func readMySQLShardBatch(task *models.SyncTask, mapping *models.SyncTaskTable, d
 	if len(wheres) > 0 {
 		query += " WHERE " + strings.Join(wheres, " AND ")
 	}
-	query += " ORDER BY " + pk + fmt.Sprintf(" LIMIT %d", defaultSyncBatchSize)
+	query += " ORDER BY " + pk + fmt.Sprintf(" LIMIT %d", snapshotBatchSize(task))
 	rows, err := db.Raw(query, params...).Rows()
 	if err != nil {
 		return nil, nil, "", err
