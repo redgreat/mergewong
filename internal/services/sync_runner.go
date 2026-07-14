@@ -3,6 +3,7 @@ package services
 import (
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"runtime"
 	"strconv"
@@ -169,6 +170,9 @@ func (s *SyncService) syncValidatedTable(task *models.SyncTask, mapping *models.
 	err := s.systemDB.Where("task_table_id = ?", mapping.ID).First(&checkpoint).Error
 	if err != nil && err != gorm.ErrRecordNotFound {
 		return 0, err
+	}
+	if err == gorm.ErrRecordNotFound {
+		log.Printf("任务 %d 表 %s 首次初始化，未找到全量检查点，将从头开始", task.ID, mapping.SourceTable)
 	}
 	if checkpoint.Completed {
 		return 0, nil

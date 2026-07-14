@@ -2,6 +2,8 @@ package database
 
 import (
 	"fmt"
+	"log"
+	"os"
 	"time"
 
 	"github.com/redgreat/mergewong/internal/config"
@@ -52,8 +54,14 @@ func (c *Connector) Connect(cfg config.DatabaseConfig) (*gorm.DB, error) {
 	}
 
 	// GORM 配置
+	gormLogger := logger.New(log.New(os.Stdout, "\r\n", log.LstdFlags), logger.Config{
+		SlowThreshold:             time.Second,
+		LogLevel:                  logger.Warn,
+		IgnoreRecordNotFoundError: true,
+		Colorful:                  false,
+	})
 	db, err := gorm.Open(dialector, &gorm.Config{
-		Logger: logger.Default.LogMode(logger.Warn),
+		Logger: gormLogger,
 		NowFunc: func() time.Time {
 			return time.Now().Local()
 		},

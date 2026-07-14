@@ -283,6 +283,7 @@ func (m *CDCManager) loadOrCreateCheckpoint(task *models.SyncTask, source *model
 	if err != nil {
 		return nil, err
 	}
+	log.Printf("任务 %d 首次进入 CDC，未找到 Binlog 检查点，记录当前位点 %s:%d 后开始初始化/追数", task.ID, file, pos)
 	checkpoint = models.SyncCDCCheckpoint{TaskID: task.ID, BinlogFile: file, BinlogPosition: pos, SnapshotCompleted: task.SyncType == "cdc"}
 	if err := m.service.systemDB.Create(&checkpoint).Error; err != nil {
 		return nil, err
