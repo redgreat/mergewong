@@ -31,7 +31,7 @@ WORKDIR /app
 COPY --from=go-builder /out/mergewong ./mergewong
 COPY --from=web-builder /src/web/dist ./web/dist
 RUN mkdir -p /app/configs /app/logs
-EXPOSE 8080
+EXPOSE 8090
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-  CMD wget -qO- http://127.0.0.1:8080/health || exit 1
+  CMD wget -qO- http://127.0.0.1:8090/health || exit 1
 ENTRYPOINT ["./mergewong"]
