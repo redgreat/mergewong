@@ -2,12 +2,15 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
+	"runtime/debug"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -23,7 +26,81 @@ import (
 	"github.com/redgreat/mergewong/internal/utils"
 )
 
+func applyMemoryLimit() {
+	limit := os.Getenv("GOMEMLIMIT")
+	if limit == "" {
+		if cg, ok := cgroupMemoryLimit(); ok && cg > 0 {
+			limit = strconv.FormatInt(cg*9/10, 10)
+		}
+	}
+	if limit == "" {
+		return
+	}
+	if n, err := parseMemoryLimit(limit); err == nil && n > 0 {
+		debug.SetMemoryLimit(n)
+		log.Printf("内存软限制: %s", limit)
+	} else if err != nil {
+		log.Printf("解析 GOMEMLIMIT 失败: %v", err)
+	}
+}
+
+func cgroupMemoryLimit() (int64, bool) {
+	for _, path := range []string{
+		"/sys/fs/cgroup/memory.max",
+		"/sys/fs/cgroup/memory/memory.limit_in_bytes",
+	} {
+		b, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+		v := strings.TrimSpace(string(b))
+		if v == "max" {
+			continue
+		}
+		n, err := strconv.ParseInt(v, 10, 64)
+		if err != nil || n <= 0 || n >= (1<<62) {
+			continue
+		}
+		return n, true
+	}
+	return 0, false
+}
+
+func parseMemoryLimit(s string) (int64, error) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return 0, nil
+	}
+	if n, err := strconv.ParseInt(s, 10, 64); err == nil {
+		return n, nil
+	}
+	lower := strings.ToLower(s)
+	multipliers := []struct {
+		suffix     string
+		multiplier int64
+	}{
+		{"gib", 1 << 30},
+		{"mib", 1 << 20},
+		{"kib", 1 << 10},
+		{"gb", 1e9},
+		{"mb", 1e6},
+		{"kb", 1e3},
+	}
+	for _, m := range multipliers {
+		if strings.HasSuffix(lower, m.suffix) {
+			n, err := strconv.ParseInt(strings.TrimSpace(strings.TrimSuffix(lower, m.suffix)), 10, 64)
+			if err != nil {
+				return 0, err
+			}
+			return n * m.multiplier, nil
+		}
+	}
+	return 0, fmt.Errorf("无法解析内存限制: %s", s)
+}
+
 func main() {
+	applyMemoryLimit()
+
 	if err := config.LoadConfig("configs/config.yaml"); err != nil {
 		log.Fatalf("加载配置失败: %v", err)
 	}
