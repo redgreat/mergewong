@@ -154,6 +154,9 @@ func (m *CDCManager) StartTask(taskID uint) error {
 		if err != nil && ctx.Err() == nil {
 			log.Printf("CDC 任务 %d 停止: %v", taskID, err)
 			m.service.recordCDCFailure(task, err)
+			if strings.Contains(err.Error(), "Could not find first log file name in binary log index file") {
+				go m.autoRecoverFromBinlogPurge(taskID)
+			}
 		} else {
 			m.service.recordCDCStopped(task)
 		}
@@ -182,6 +185,35 @@ func (m *CDCManager) StopTask(taskID uint) {
 		delete(m.workers, taskID)
 	}
 	m.mu.Unlock()
+}
+
+func (m *CDCManager) autoRecoverFromBinlogPurge(taskID uint) {
+	time.Sleep(3 * time.Second)
+	task, err := m.service.GetTask(taskID)
+	if err != nil {
+		log.Printf("CDC 任务 %d 自动恢复失败(获取任务): %v", taskID, err)
+		return
+	}
+	file, pos, err := currentMySQLPosition(task.SourceDB)
+	if err != nil {
+		log.Printf("CDC 任务 %d 自动恢复失败(获取位点): %v", taskID, err)
+		return
+	}
+	if err := m.service.systemDB.Model(&models.SyncCDCCheckpoint{}).
+		Where("task_id = ?", taskID).
+		Updates(map[string]interface{}{
+			"binlog_file":        file,
+			"binlog_position":    pos,
+			"snapshot_completed": true,
+		}).Error; err != nil {
+		log.Printf("CDC 任务 %d 自动恢复失败(更新检查点): %v", taskID, err)
+		return
+	}
+	log.Printf("CDC 任务 %d checkpoint 已重置到当前位点 %s:%d，重新启动", taskID, file, pos)
+	m.service.RecordTaskEvent(task, "cdc_auto_recover", "cdc", "running", "Binlog 被清理，自动从当前位点恢复", fmt.Sprintf("新位点 %s:%d", file, pos), 0, 0)
+	if err := m.StartTask(taskID); err != nil {
+		log.Printf("CDC 任务 %d 自动恢复失败(重启): %v", taskID, err)
+	}
 }
 
 func (m *CDCManager) IsRunning(taskID uint) bool {
@@ -813,6 +845,10 @@ func (s *SyncService) recordCDCFailure(task *models.SyncTask, err error) {
 	now := time.Now()
 	_ = s.UpdateTask(task.ID, map[string]interface{}{"last_run_at": &now, "last_run_status": "failed", "runtime_status": "failed", "last_run_message": err.Error()})
 	s.RecordTaskEvent(task, "cdc_failed", "cdc", "failed", "CDC 同步失败", err.Error(), 0, 0)
+
+	alertService := NewAlertService()
+	content := fmt.Sprintf("CDC 同步任务异常停止\n任务：%s\n错误：%s", task.Name, err.Error())
+	_ = alertService.SendTaskAlert(context.Background(), task, "error", content)
 }
 
 func (s *SyncService) recordCDCStopped(task *models.SyncTask) {

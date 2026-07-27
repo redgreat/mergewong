@@ -122,8 +122,23 @@ func (s *AlertService) CheckTaskAlerts(ctx context.Context) error {
 		task := &tasks[i]
 		if task.RepairStatus == "comparing" || task.RepairStatus == "repairing" {
 			_ = s.ResolveTaskAlertSilent(task.ID, "delay")
+			_ = s.ResolveTaskAlertSilent(task.ID, "error")
 			continue
 		}
+		if task.SyncType == "full" {
+			continue
+		}
+
+		// 检测 CDC 任务异常停止
+		if task.RuntimeStatus == "failed" && task.LastRunStatus == "failed" {
+			content := fmt.Sprintf("CDC 同步任务异常停止\n任务：%s\n错误信息：%s", task.Name, task.LastRunMessage)
+			_ = s.SendTaskAlert(ctx, task, "error", content)
+			_ = s.ResolveTaskAlertSilent(task.ID, "delay")
+			_ = s.ResolveTaskAlertSilent(task.ID, "stopped")
+			continue
+		}
+		_ = s.ResolveTaskAlertSilent(task.ID, "error")
+
 		if !taskAlertEligible(task) {
 			_ = s.ResolveTaskAlertSilent(task.ID, "delay")
 			_ = s.ResolveTaskAlertSilent(task.ID, "stopped")
