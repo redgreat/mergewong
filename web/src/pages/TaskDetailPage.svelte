@@ -10,7 +10,12 @@
   const stateText = (state) => ({ pending:"等待初始化", initializing:"全量初始化", snapshot_completed:"全量完成", catching_up:"增量追数", active:"同步中", failed:"失败" }[state] || state || "等待初始化");
   const runtimeText = (state) => ({ pending:"待预检查", initializing:"全量初始化", catching_up:"增量追数", cdc_running:"增量同步中", paused:"暂停", stopped:"停止", completed:"完成", failed:"失败" }[state] || state);
   const jobText = (status) => ({ running:"执行中", canceling:"取消中", canceled:"已取消", success:"完成", failed:"失败" }[status] || status || "-");
-  const jobTypeText = (type) => ({ compare:"全量对比", repair:"补数" }[type] || type);
+  const jobTypeText = (type, job) => {
+    if (type === "repair") return "补数";
+    if (type === "compare" && (job?.cutoff_time || job?.cutoff_from)) return "按时间段补数";
+    if (type === "compare") return "全量对比";
+    return type;
+  };
   const diffTypeText = (type) => ({ missing_target:"目标缺少", missing_source:"源端缺少", mismatch:"字段不一致" }[type] || type || "-");
   const delayText = (seconds=0) => {
     if (seconds <= 0) return "0 ms";
@@ -60,6 +65,7 @@
   let compareTimeFrom = "";
   let compareTimeTo = "";
   let timeCompareError = "";
+  let showJobDetail = null;
   // 按时间段补数弹窗配置
   let compareTables = [];
   let compareTablePage = 1;
@@ -510,12 +516,12 @@
         {#if repairJobs.length === 0}<tr class="empty-row repair-empty-row"><td colspan={canManage ? 8 : 7}><div class="empty-state repair-empty"><span class="empty-icon"><ShieldAlert size={24} /></span><strong>暂无数据修复任务</strong><p>发起全量对比后，可以根据差异一键补数。</p></div></td></tr>{/if}
         {#each repairJobs as job}
           <tr>
-            <td>{jobTypeText(job.job_type)}</td>
+            <td>{jobTypeText(job.job_type, job)}</td>
             <td><span class={`pill ${job.status === "failed" ? "danger" : job.status === "success" ? "success" : "muted"}`}>{jobText(job.status)}</span></td>
             <td>{(job.progress_percent || 0).toFixed(1)}%</td>
             <td>{#if Number(job.diff_rows || 0) > 0}<button class="link-button" on:click={() => openDiffs(job)}>{job.diff_rows}</button>{:else}0{/if}</td>
             <td>{job.repaired_rows || 0}</td>
-            <td>{job.error_detail || job.message || "-"}{#if job.cutoff_column || job.cutoff_time}<span class="cell-sub">{#if job.cutoff_column}{job.cutoff_column}{/if}{#if job.cutoff_time} ≤ {new Date(job.cutoff_time).toLocaleString()}{/if}</span>{/if}</td>
+            <td>{job.error_detail || job.message || "-"}{#if job.cutoff_from || job.cutoff_time}<button class="link-button" on:click={() => showJobDetail = job}>详情</button>{:else if job.cutoff_column || job.cutoff_time}<span class="cell-sub">{#if job.cutoff_column}{job.cutoff_column}{/if}{#if job.cutoff_time} ≤ {new Date(job.cutoff_time).toLocaleString()}{/if}</span>{/if}</td>
             <td>{job.started_at ? new Date(job.started_at).toLocaleString() : "-"}</td>
             {#if canManage}<td>{#if canRepairJob(job)}<button class="ghost icon-text" disabled={repairBusy || !!runningJob} on:click={() => startRepair(job)}><RotateCw size={14}/>补这次</button>{:else if job.status === "running" || job.status === "canceling"}<button class="ghost icon-text" disabled={repairBusy} on:click={() => confirmCancel(job)}><X size={14}/>取消</button>{:else}-{/if}</td>{/if}
           </tr>
@@ -609,6 +615,37 @@
         <button class="ghost" on:click={() => { showTimeCompareModal = false; }}>取消</button>
         <button class="primary" disabled={!compareTables.some(t => t.included && t.cutoffColumn)} on:click={startTimeCompare}>确认发起</button>
       </div>
+    </div>
+  </div>
+{/if}
+
+{#if showJobDetail}
+  <div class="modal-layer">
+    <button class="modal-backdrop" aria-label="关闭" on:click={() => (showJobDetail = null)}></button>
+    <div class="modal compact-modal">
+      <div class="modal-header">
+        <h3>对比详情</h3>
+        <p>{jobTypeText(showJobDetail.job_type, showJobDetail)}</p>
+        <button class="ghost icon" on:click={() => (showJobDetail = null)}><X size={17} /></button>
+      </div>
+      <div class="detail-info-grid">
+        <div><span>开始时间</span><strong>{showJobDetail.cutoff_from ? new Date(showJobDetail.cutoff_from).toLocaleString() : "不限"}</strong></div>
+        <div><span>结束时间</span><strong>{showJobDetail.cutoff_time ? new Date(showJobDetail.cutoff_time).toLocaleString() : "不限"}</strong></div>
+        <div style="grid-column:1/-1"><span>参与表</span><strong>{showJobDetail.table_cutoffs ? Object.keys(showJobDetail.table_cutoffs).length + " 张表" : "全部表"}</strong></div>
+        {#if showJobDetail.table_cutoffs}
+          <div style="grid-column:1/-1">
+            <table class="data-table" style="margin-top:0.5rem">
+              <thead><tr><th>表 ID</th><th>时间字段</th></tr></thead>
+              <tbody>
+                {#each Object.entries(showJobDetail.table_cutoffs) as [tableId, col]}
+                  <tr><td>{tableId}</td><td>{col}</td></tr>
+                {/each}
+              </tbody>
+            </table>
+          </div>
+        {/if}
+      </div>
+      <div class="actions"><button on:click={() => (showJobDetail = null)}>关闭</button></div>
     </div>
   </div>
 {/if}
