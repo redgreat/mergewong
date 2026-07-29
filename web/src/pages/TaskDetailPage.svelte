@@ -288,6 +288,12 @@
       timeCompareError = "";
       showTimeCompareModal = true;
       repairBusy = false;
+      // preload columns for all tables so rows that are pre-checked have their dropdown ready
+      for (const item of items) {
+        if (!item.colsLoaded && !item.loadingColumns) {
+          loadCompareTableColumns(item);
+        }
+      }
     } catch (err) { repairError = err.message; repairBusy = false; }
   }
 
@@ -295,6 +301,8 @@
   async function loadCompareTableColumns(tableItem) {
     if (!task.id || tableItem.loadingColumns || tableItem.colsLoaded) return;
     tableItem.loadingColumns = true;
+    // force Svelte to pick up the loading state
+    compareTables = compareTables;
     try {
       const connName = task.source_db;
       const schema = await request(`/api/db/${encodeURIComponent(connName)}/table/${encodeURIComponent(tableItem.source_table)}/schema`, { token });
@@ -305,11 +313,15 @@
         return t.includes("time") || t.includes("date") || t.includes("timestamp") || n.includes("time") || n.includes("date");
       }).map(c => c.name || c.Field || c.COLUMN_NAME || "");
       tableItem.allColumns = cols;
-      tableItem.colsLoaded = true;
       if (cols.length > 0) tableItem.cutoffColumn = cols[0];
+      tableItem.colsLoaded = true;
     } catch (err) { /* ignore */ }
-    finally { tableItem.loadingColumns = false; }
+    finally {
+      tableItem.loadingColumns = false;
+      compareTables = compareTables;
+    }
   }
+
   // 翻页时自动加载可见表的时间字段
   $: if (showTimeCompareModal && repairTablePageItems.length > 0) {
     for (const item of repairTablePageItems) {
@@ -545,11 +557,11 @@
       </div>
       {#if timeCompareError}<div class="inline-error" style="margin:0 1.25rem 0.5rem">{timeCompareError}</div>{/if}
       <table class="data-table">
-        <thead><tr><th style="width:2.5rem">参与</th><th>源表</th><th>目标表</th><th>时间字段</th></tr></thead>
+        <thead><tr><th style="width:2.5rem" aria-label="参与"></th><th>源表</th><th>目标表</th><th>时间字段</th></tr></thead>
         <tbody>
           {#each repairTablePageItems as item}
             <tr>
-              <td style="text-align:center"><input type="checkbox" bind:checked={item.included} /></td>
+              <td style="text-align:center"><input type="checkbox" bind:checked={item.included} on:change={() => { if (item.included) loadCompareTableColumns(item); }} /></td>
               <td>{item.source_table}</td>
               <td>{item.target_table}</td>
               <td>

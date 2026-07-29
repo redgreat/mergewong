@@ -488,8 +488,8 @@ button.modal-backdrop:active:not(:disabled) { position: absolute; inset: 0; padd
 .modal-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 18px; }
 
 /* ------ confirm dialogs --------------------------------------------------- */
-.confirm-modal { width: min(440px, 96vw); padding: 28px 28px 22px; text-align: center; }
-.confirm-modal .modal-header { margin-bottom: 0; text-align: center; }
+.confirm-modal { width: min(440px, 96vw); padding: 28px 28px 22px; }
+.confirm-modal .modal-header { margin-bottom: 0; }
 .confirm-modal .modal-header h3 { font-size: 18px; }
 .confirm-compare-body { margin-bottom: 20px; }
 .confirm-compare-body h3 { margin: 0 0 12px; font-size: 18px; }

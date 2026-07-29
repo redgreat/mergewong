@@ -2,6 +2,7 @@ package services
 
 import (
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/redgreat/mergewong/internal/models"
@@ -45,6 +46,8 @@ func runtimeLabel(status string) string {
 	}
 }
 
+var pauseUpdaters sync.Map
+
 func (s *SyncService) PauseTask(taskID uint) error {
 	task, err := s.GetTask(taskID)
 	if err != nil {
@@ -55,10 +58,8 @@ func (s *SyncService) PauseTask(taskID uint) error {
 	}
 	GetCDCManager().StopTask(taskID)
 	now := time.Now()
-	// 暂停时冻结当前延迟值，并记录暂停时刻，前端后续通过已暂停时长推算近似延迟
 	delaySeconds := task.DelaySeconds
 	if delaySeconds <= 0 {
-		// 如果没有有效延迟，用当前时间减去最后成功时间估算
 		if task.LastSuccessAt != nil {
 			delaySeconds = int64(now.Sub(*task.LastSuccessAt).Seconds())
 		}
@@ -73,12 +74,15 @@ func (s *SyncService) PauseTask(taskID uint) error {
 	}
 	_ = NewAlertService().ResolveTaskAlertSilent(taskID, "delay")
 	s.RecordTaskEvent(task, "task_paused", "control", "success", "任务已暂停", "", 0, 0)
-	// 启动定时器，暂停期间每分钟更新一次延迟值
-	go s.pauseDelayUpdater(taskID)
+	// 同一任务只启动一个 updater
+	if _, loaded := pauseUpdaters.LoadOrStore(taskID, true); !loaded {
+		go s.pauseDelayUpdater(taskID)
+	}
 	return nil
 }
 
 func (s *SyncService) pauseDelayUpdater(taskID uint) {
+	defer pauseUpdaters.Delete(taskID)
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
 	for range ticker.C {
@@ -89,13 +93,11 @@ func (s *SyncService) pauseDelayUpdater(taskID uint) {
 		if task.RuntimeStatus != "paused" {
 			return
 		}
-		// 从 last_success_at 推算当前延迟
 		now := time.Now()
 		if task.LastSuccessAt != nil {
 			newDelay := int64(now.Sub(*task.LastSuccessAt).Seconds())
 			_ = s.systemDB.Model(&task).Update("delay_seconds", newDelay)
 		} else {
-			// 没有 last_success_at 就递增
 			_ = s.systemDB.Model(&task).Update("delay_seconds", gorm.Expr("delay_seconds + 30"))
 		}
 	}
