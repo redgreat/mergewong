@@ -467,6 +467,15 @@ func (m *CDCManager) stream(ctx context.Context, task *models.SyncTask, source *
 			if len(operations)%5000 == 0 {
 				log.Printf("[CDC] 任务 %d 大事务进行中: 已缓存 %d 行 (i:%d u:%d d:%d) 位点 %s:%d", task.ID, len(operations), opMetrics.Insert, opMetrics.Update, opMetrics.Delete, currentFile, event.Header.LogPos)
 			}
+			// 内存保护：缓存超过 100000 行时提前拆单写入，防止 OOM
+			// 虽然破坏了单个源事务的原子性，但 upsert 幂等保证最终一致性
+			if len(operations) >= 100000 {
+				log.Printf("[CDC] 任务 %d 内存保护触发: 缓存 %d 行，提前写入", task.ID, len(operations))
+				if err := applyCDCTransaction(targetDB, operations, task, m.service.systemDB, streamStarted); err != nil {
+					return err
+				}
+				operations = operations[:0]
+			}
 		case *replication.XIDEvent:
 			// #region debug-point A:xid_event_before_apply
 			xaDebugReport("A", "cdc_service.go:XIDEvent", "XIDEvent 提交点触发 apply", map[string]interface{}{"task_id": task.ID, "ops_len": len(operations), "file": currentFile, "pos": event.Header.LogPos, "event_ts": event.Header.Timestamp})
@@ -833,10 +842,14 @@ func xaKeySuffix(xidKey string) (string, bool) {
 	return parts[1], true
 }
 
-// cdcMaxBatchRows 控制 CDC 单次批量写入的最大行数，避免超过 MySQL 参数占位符上限
-// MySQL 默认 max_prepared_stmt_count=16382，每个占位符对应一个 ?
-// 普通列数按 50 列估算，单批次上限约 300 行足够安全
-const cdcMaxBatchRows = 2000
+// cdcMaxBatchRows 返回 CDC 单次批量写入的最大行数
+// 优先使用任务配置的 sync_batch_size，否则默认 1000
+func cdcMaxBatchRows(task *models.SyncTask) int {
+	if task != nil && task.SyncBatchSize > 0 {
+		return task.SyncBatchSize
+	}
+	return 1000
+}
 
 // applyCDCProgress 在 CDC 大事务写入期间更新任务速率和延迟，不推进检查点
 func applyCDCProgress(systemDB *gorm.DB, taskID uint, batchRows int, batchDuration time.Duration, streamStarted time.Time, totalProcessed int) {
@@ -887,9 +900,10 @@ func applyCDCTransaction(db *gorm.DB, operations []cdcOperation, task *models.Sy
 	// 每写完一批就更新一次任务延迟和速率，避免大事务期间前端指标不刷新
 	processedTotal := 0
 	for _, g := range groups {
+		batchSize := cdcMaxBatchRows(task)
 		rows := g.rows
-		for start := 0; start < len(rows); start += cdcMaxBatchRows {
-			end := start + cdcMaxBatchRows
+		for start := 0; start < len(rows); start += batchSize {
+			end := start + batchSize
 			if end > len(rows) {
 				end = len(rows)
 			}
@@ -903,6 +917,7 @@ func applyCDCTransaction(db *gorm.DB, operations []cdcOperation, task *models.Sy
 			}
 			log.Printf("[CDC] 大事务写入进度: task=%d batch=%d total=%d/%d 行", task.ID, end-start, processedTotal, len(operations))
 		}
+		log.Printf("[CDC] 大事务写入完成: task=%d 总行数 %d 批大小 %d", task.ID, len(rows), batchSize)
 	}
 	// delete 操作也独立提交
 	for _, op := range deletes {

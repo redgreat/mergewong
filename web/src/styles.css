@@ -399,7 +399,7 @@ button.modal-backdrop:active:not(:disabled) { position: absolute; inset: 0; padd
 .task-modal { max-height: calc(100vh - 48px); overflow-y: auto; }
 .task-wizard { width: min(820px, 96vw); padding: 0; overflow: visible; }
 .task-wizard .modal-header { margin: 0; padding: 22px 24px 18px; border-bottom: 1px solid var(--border-soft); }
-.wizard-steps { display: grid; grid-template-columns: repeat(4, 1fr); padding: 0 24px; border-bottom: 1px solid var(--border-soft); }
+.wizard-steps { display: grid; grid-template-columns: repeat(5, 1fr); padding: 0 24px; border-bottom: 1px solid var(--border-soft); }
 .wizard-steps button { position: relative; justify-content: center; display: flex; align-items: center; gap: 8px; padding: 14px 10px; color: var(--text-muted); background: transparent; border: 0; border-radius: 0; font-size: 13px; }
 .wizard-steps button:hover:not(:disabled) { color: var(--text); background: transparent; }
 .wizard-steps button.active { color: var(--primary); }
