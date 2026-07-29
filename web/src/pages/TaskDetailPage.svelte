@@ -409,10 +409,18 @@
     finally { repairBusy = false; }
   }
 	onMount(() => {
-	    loadRepairJobs();
-	    loadMetrics();
-	  });
+    loadRepairJobs();
+    loadMetrics();
+  });
+
+  function handleOutsideClick(event) {
+    if (repairActionsOpenId != null && !event.target.closest('.actions-dropdown')) {
+      repairActionsOpenId = null;
+    }
+  }
 </script>
+
+<svelte:window on:click={handleOutsideClick} />
 
 <section class="task-detail-page">
   <div class="detail-heading"><div><button class="ghost icon-text" on:click={onBack}><ArrowLeft size={16}/>返回任务</button><h2>{task.name}</h2><p>{task.source_db} → {task.target_db}</p></div><button class="ghost icon-text" on:click={() => refreshDetail(true)}><RefreshCw size={15}/>刷新</button></div>
@@ -540,7 +548,7 @@
             <td>{job.repaired_rows || 0}</td>
             <td>{job.error_detail || job.message || "-"}{#if job.cutoff_column || job.cutoff_time}<span class="cell-sub">{#if job.cutoff_column}{job.cutoff_column}{/if}{#if job.cutoff_time} ≤ {new Date(job.cutoff_time).toLocaleString()}{/if}</span>{/if}</td>
             <td>{job.started_at ? new Date(job.started_at).toLocaleString() : "-"}</td>
-            {#if canManage}<td class="actions-cell">{#if (job.cutoff_from || job.cutoff_time) || canRepairJob(job) || job.status === "running" || job.status === "canceling"}<div class="actions-dropdown" class:open={repairActionsOpenId === job.id}><button class="ghost icon-text" on:click={() => repairActionsOpenId = repairActionsOpenId === job.id ? null : job.id}>…</button>{#if repairActionsOpenId === job.id}<div class="dropdown-menu">{#if job.cutoff_from || job.cutoff_time}<button on:click={() => { showJobDetail = job; repairActionsOpenId = null; }}>详情</button>{/if}{#if canRepairJob(job)}<button disabled={repairBusy || !!runningJob} on:click={() => { repairActionsOpenId = null; startRepair(job); }}>补这次</button>{/if}{#if job.status === "running" || job.status === "canceling"}<button disabled={repairBusy} on:click={() => { repairActionsOpenId = null; confirmCancel(job); }}>取消</button>{/if}</div>{/if}</div>{:else}-{/if}</td>{/if}
+            {#if canManage}<td class="actions-cell">{#if (job.cutoff_from || job.cutoff_time) || canRepairJob(job) || job.status === "running" || job.status === "canceling"}<div class="actions-dropdown" class:open={repairActionsOpenId === job.id}><button class="ghost icon-text" on:click|stopPropagation={() => repairActionsOpenId = repairActionsOpenId === job.id ? null : job.id}>…</button>{#if repairActionsOpenId === job.id}<div class="dropdown-menu">{#if job.cutoff_from || job.cutoff_time}<button on:click={() => { showJobDetail = job; repairActionsOpenId = null; }}>详情</button>{/if}{#if canRepairJob(job)}<button disabled={repairBusy || !!runningJob} on:click={() => { repairActionsOpenId = null; startRepair(job); }}>补这次</button>{/if}{#if job.status === "running" || job.status === "canceling"}<button disabled={repairBusy} on:click={() => { repairActionsOpenId = null; confirmCancel(job); }}>取消</button>{/if}</div>{/if}</div>{:else}-{/if}</td>{/if}
           </tr>
         {/each}
       </tbody>
@@ -548,8 +556,6 @@
   </section>
   {/if}
 </section>
-
-<svelte:window on:click={(e) => { if (repairActionsOpenId != null && !e.target.closest('.actions-dropdown')) repairActionsOpenId = null; }} />
 
 {#if showCancelConfirm && pendingCancelJob}
   <div class="modal-layer">
