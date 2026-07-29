@@ -66,6 +66,11 @@
   let compareTimeTo = "";
   let timeCompareError = "";
   let showJobDetail = null;
+  let jobDetailTablePage = 1;
+  const jobDetailTablePageSize = 8;
+  // 查找任务表名
+  $: taskTableMap = {};
+  $: { const tables = task.task_tables || []; for (const t of tables) taskTableMap[t.id] = { source: t.source_table, target: t.target_table }; }
   // 按时间段补数弹窗配置
   let compareTables = [];
   let compareTablePage = 1;
@@ -521,7 +526,7 @@
             <td>{(job.progress_percent || 0).toFixed(1)}%</td>
             <td>{#if Number(job.diff_rows || 0) > 0}<button class="link-button" on:click={() => openDiffs(job)}>{job.diff_rows}</button>{:else}0{/if}</td>
             <td>{job.repaired_rows || 0}</td>
-            <td>{job.error_detail || job.message || "-"}{#if job.cutoff_from || job.cutoff_time}<button class="link-button" on:click={() => showJobDetail = job}>详情</button>{:else if job.cutoff_column || job.cutoff_time}<span class="cell-sub">{#if job.cutoff_column}{job.cutoff_column}{/if}{#if job.cutoff_time} ≤ {new Date(job.cutoff_time).toLocaleString()}{/if}</span>{/if}</td>
+            <td><div class="repair-desc"><span class="repair-desc-msg">{job.error_detail || job.message || "-"}</span>{#if job.cutoff_from || job.cutoff_time}<button class="link-button" on:click={() => showJobDetail = job}>详情</button>{:else if job.cutoff_column || job.cutoff_time}<span class="cell-sub">{#if job.cutoff_column}{job.cutoff_column}{/if}{#if job.cutoff_time} ≤ {new Date(job.cutoff_time).toLocaleString()}{/if}</span>{/if}</div></td>
             <td>{job.started_at ? new Date(job.started_at).toLocaleString() : "-"}</td>
             {#if canManage}<td>{#if canRepairJob(job)}<button class="ghost icon-text" disabled={repairBusy || !!runningJob} on:click={() => startRepair(job)}><RotateCw size={14}/>补这次</button>{:else if job.status === "running" || job.status === "canceling"}<button class="ghost icon-text" disabled={repairBusy} on:click={() => confirmCancel(job)}><X size={14}/>取消</button>{:else}-{/if}</td>{/if}
           </tr>
@@ -620,32 +625,41 @@
 {/if}
 
 {#if showJobDetail}
+  {@const cutoffs = showJobDetail.table_cutoffs ? Object.entries(showJobDetail.table_cutoffs) : []}
+  {@const totalCutoffPages = Math.max(1, Math.ceil(cutoffs.length / jobDetailTablePageSize))}
+  {@const cutoffPage = cutoffs.slice((jobDetailTablePage - 1) * jobDetailTablePageSize, jobDetailTablePage * jobDetailTablePageSize)}
   <div class="modal-layer">
-    <button class="modal-backdrop" aria-label="关闭" on:click={() => (showJobDetail = null)}></button>
-    <div class="modal compact-modal">
+    <button class="modal-backdrop" aria-label="关闭" on:click={() => { showJobDetail = null; jobDetailTablePage = 1; }}></button>
+    <div class="modal job-detail-modal">
       <div class="modal-header">
-        <h3>对比详情</h3>
-        <p>{jobTypeText(showJobDetail.job_type, showJobDetail)}</p>
-        <button class="ghost icon" on:click={() => (showJobDetail = null)}><X size={17} /></button>
+        <div><h3>{jobTypeText(showJobDetail.job_type, showJobDetail)} · 详情</h3></div>
+        <button class="ghost icon" on:click={() => { showJobDetail = null; jobDetailTablePage = 1; }}><X size={17} /></button>
       </div>
-      <div class="detail-info-grid">
+      <div class="job-detail-time">
         <div><span>开始时间</span><strong>{showJobDetail.cutoff_from ? new Date(showJobDetail.cutoff_from).toLocaleString() : "不限"}</strong></div>
         <div><span>结束时间</span><strong>{showJobDetail.cutoff_time ? new Date(showJobDetail.cutoff_time).toLocaleString() : "不限"}</strong></div>
-        <div style="grid-column:1/-1"><span>参与表</span><strong>{showJobDetail.table_cutoffs ? Object.keys(showJobDetail.table_cutoffs).length + " 张表" : "全部表"}</strong></div>
-        {#if showJobDetail.table_cutoffs}
-          <div style="grid-column:1/-1">
-            <table class="data-table" style="margin-top:0.5rem">
-              <thead><tr><th>表 ID</th><th>时间字段</th></tr></thead>
-              <tbody>
-                {#each Object.entries(showJobDetail.table_cutoffs) as [tableId, col]}
-                  <tr><td>{tableId}</td><td>{col}</td></tr>
-                {/each}
-              </tbody>
-            </table>
+      </div>
+      <div class="job-detail-section"><strong>参与表</strong><span class="job-detail-count">{cutoffs.length} 张表</span></div>
+      {#if cutoffs.length > 0}
+        <table class="data-table job-detail-table">
+          <thead><tr><th>源表</th><th>目标表</th><th>筛选字段</th></tr></thead>
+          <tbody>
+            {#each cutoffPage as [tableId, col]}
+              <tr><td>{taskTableMap[tableId]?.source || tableId}</td><td>{taskTableMap[tableId]?.target || tableId}</td><td>{col}</td></tr>
+            {/each}
+          </tbody>
+        </table>
+        {#if totalCutoffPages > 1}
+          <div class="pager">
+            <button class="ghost" disabled={jobDetailTablePage <= 1} on:click={() => { jobDetailTablePage -= 1; }}><ChevronLeft size={14} />上一页</button>
+            <span>{jobDetailTablePage} / {totalCutoffPages}</span>
+            <button class="ghost" disabled={jobDetailTablePage >= totalCutoffPages} on:click={() => { jobDetailTablePage += 1; }}>下一页<ChevronRight size={14} /></button>
           </div>
         {/if}
-      </div>
-      <div class="actions"><button on:click={() => (showJobDetail = null)}>关闭</button></div>
+      {:else}
+        <div class="empty-state">全部表</div>
+      {/if}
+      <div class="modal-actions"><button class="primary" on:click={() => { showJobDetail = null; jobDetailTablePage = 1; }}>关闭</button></div>
     </div>
   </div>
 {/if}
