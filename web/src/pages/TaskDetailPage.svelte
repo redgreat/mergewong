@@ -1,6 +1,6 @@
 <script>
   import { onMount } from "svelte";
-  import { ArrowLeft, Database, Gauge, RefreshCw, RotateCw, ShieldAlert, Workflow, X } from "lucide-svelte";
+  import { ArrowLeft, Database, Gauge, RefreshCw, RotateCw, ShieldAlert, Workflow, X, ChevronLeft, ChevronRight } from "lucide-svelte";
   import { request } from "../api.js";
   export let task = {};
   export let token = "";
@@ -42,6 +42,17 @@
   let loadedCutoffTaskId = 0;
   let repairBusy = false;
   let detailRefreshing = false;
+  let showCancelConfirm = false;
+  let pendingCancelJob = null;
+  let showFullCompareConfirm = false;
+  let showTimeCompareModal = false;
+  let compareCutoffTime = "";
+  // 按时间段补数弹窗配置
+  let compareTables = [];
+  let compareTablePage = 1;
+  let compareTablePageSize = 10;
+  let compareAllColumns = {};
+  let compareTableIdCounter = 0;
 	$: snapshotTotal = (task.task_tables || []).reduce((sum, table) => sum + Number(table.snapshot_total || 0), 0);
 	$: snapshotProcessed = (task.task_tables || []).reduce((sum, table) => sum + Number(table.snapshot_processed || 0), 0);
 	$: overallPercent = snapshotTotal > 0 ? Math.min(100, snapshotProcessed * 100 / snapshotTotal) : ((task.task_tables || []).every((table) => table.sync_state === "active") ? 100 : 0);
@@ -225,12 +236,15 @@
       diffTotal = 0;
     }
   }
-  async function startCompare() {
+  function confirmFullCompare() {
+    showFullCompareConfirm = true;
+  }
+  async function startFullCompare() {
     if (!task.id || repairBusy) return;
+    showFullCompareConfirm = false;
     repairBusy = true;
     try {
-      const body = { cutoff_column: cutoffColumn.trim(), cutoff_time: normalizeCutoffTime(cutoffTime) };
-      await request(`/api/sync/tasks/${task.id}/repair/compare`, { method: "POST", token, body });
+      await request(`/api/sync/tasks/${task.id}/repair/compare`, { method: "POST", token, body: {} });
       await loadRepairJobs();
       onRefresh();
     } catch (err) { repairError = err.message; }
@@ -246,12 +260,87 @@
     } catch (err) { repairError = err.message; }
     finally { repairBusy = false; }
   }
-  async function cancelRepair(job) {
-    if (!job || repairBusy) return;
+  function confirmCancel(job) {
+    pendingCancelJob = job;
+    showCancelConfirm = true;
+  }
+  async function doCancel() {
+    if (!pendingCancelJob || repairBusy) return;
+    repairBusy = true;
+    showCancelConfirm = false;
+    try {
+      await request(`/api/sync/repair/jobs/${pendingCancelJob.id}/cancel`, { method: "POST", token });
+      await loadRepairJobs();
+      pendingCancelJob = null;
+    } catch (err) { repairError = err.message; }
+    finally { repairBusy = false; }
+  }
+  function repairTablePageCount() {
+    return Math.max(1, Math.ceil(compareTables.length / compareTablePageSize));
+  }
+  $: repairTableTotalPages = repairTablePageCount();
+  $: repairTablePageItems = compareTables.slice((compareTablePage - 1) * compareTablePageSize, compareTablePage * compareTablePageSize);
+
+  async function openTimeCompare() {
+    if (!task.id || repairBusy) return;
     repairBusy = true;
     try {
-      await request(`/api/sync/repair/jobs/${job.id}/cancel`, { method: "POST", token });
+      const tables = task.task_tables || [];
+      const items = [];
+      for (let i = 0; i < tables.length; i++) {
+        const t = tables[i];
+        items.push({ index: i, source_table: t.source_table, target_table: t.target_table, task_table_id: t.id, included: true, cutoffColumn: "", allColumns: [], loadingColumns: false });
+      }
+      compareTables = items;
+      compareTablePage = 1;
+      compareCutoffTime = new Date().toISOString().slice(0, 16);
+      showTimeCompareModal = true;
+      repairBusy = false;
+    } catch (err) { repairError = err.message; repairBusy = false; }
+  }
+
+  // 加载指定表的时间字段
+  async function loadCompareTableColumns(tableItem) {
+    if (!task.id || tableItem.loadingColumns || tableItem.allColumns.length > 0) return;
+    tableItem.loadingColumns = true;
+    try {
+      const connName = task.source_db;
+      const schema = await request(`/api/db/${encodeURIComponent(connName)}/table/${encodeURIComponent(tableItem.source_table)}/schema`, { token });
+      const cols = (schema.columns || []).filter(c => {
+        const t = (c.type || "").toLowerCase();
+        return t.includes("time") || t.includes("date") || t.includes("timestamp") || t === "datetime" || c.name.toLowerCase().includes("time") || c.name.toLowerCase().includes("date");
+      }).map(c => c.name);
+      tableItem.allColumns = cols;
+      if (cols.length > 0) tableItem.cutoffColumn = cols[0];
+    } catch (err) { /* ignore */ }
+    finally { tableItem.loadingColumns = false; }
+  }
+
+  function normalizeDatetimeLocal(value) {
+    if (!value) return "";
+    const d = new Date(value);
+    if (isNaN(d.getTime())) return "";
+    return d.toISOString();
+  }
+  async function startTimeCompare() {
+    if (!task.id || repairBusy) return;
+    repairBusy = true;
+    showTimeCompareModal = false;
+    try {
+      const included = compareTables.filter(t => t.included && t.cutoffColumn);
+      if (included.length === 0) {
+        repairError = "请至少选择一张表并选择时间字段";
+        repairBusy = false;
+        return;
+      }
+      const tableCutoffs = {};
+      for (const item of included) {
+        tableCutoffs[item.task_table_id] = item.cutoffColumn;
+      }
+      const body = { table_cutoffs: tableCutoffs, cutoff_time: normalizeDatetimeLocal(compareCutoffTime) };
+      await request(`/api/sync/tasks/${task.id}/repair/compare`, { method: "POST", token, body });
       await loadRepairJobs();
+      onRefresh();
     } catch (err) { repairError = err.message; }
     finally { repairBusy = false; }
   }
@@ -364,7 +453,8 @@
       <div><h2>数据修复</h2><p>按当前字段映射和忽略字段执行源端到目标端的一致性对比与补数。</p></div>
       {#if canManage}
         <div class="header-actions">
-          <button class="ghost icon-text" disabled={repairBusy || !!runningJob} on:click={startCompare}><ShieldAlert size={15}/>全量对比</button>
+          <button class="ghost icon-text" disabled={repairBusy || !!runningJob} on:click={confirmFullCompare}><ShieldAlert size={15}/>全量对比</button>
+          <button class="ghost icon-text" disabled={repairBusy || !!runningJob} on:click={openTimeCompare}><RefreshCw size={15}/>按时间段补数</button>
         </div>
       {/if}
     </div>
@@ -395,13 +485,94 @@
             <td>{job.repaired_rows || 0}</td>
             <td>{job.error_detail || job.message || "-"}{#if job.cutoff_column || job.cutoff_time}<span class="cell-sub">{#if job.cutoff_column}{job.cutoff_column}{/if}{#if job.cutoff_time} ≤ {new Date(job.cutoff_time).toLocaleString()}{/if}</span>{/if}</td>
             <td>{job.started_at ? new Date(job.started_at).toLocaleString() : "-"}</td>
-            {#if canManage}<td>{#if canRepairJob(job)}<button class="ghost icon-text" disabled={repairBusy || !!runningJob} on:click={() => startRepair(job)}><RotateCw size={14}/>补这次</button>{:else if job.status === "running" || job.status === "canceling"}<button class="ghost icon-text" disabled={repairBusy} on:click={() => cancelRepair(job)}><X size={14}/>取消</button>{:else}-{/if}</td>{/if}
+            {#if canManage}<td>{#if canRepairJob(job)}<button class="ghost icon-text" disabled={repairBusy || !!runningJob} on:click={() => startRepair(job)}><RotateCw size={14}/>补这次</button>{:else if job.status === "running" || job.status === "canceling"}<button class="ghost icon-text" disabled={repairBusy} on:click={() => confirmCancel(job)}><X size={14}/>取消</button>{:else}-{/if}</td>{/if}
           </tr>
         {/each}
       </tbody>
     </table>
   </section>
 </section>
+
+{#if showCancelConfirm && pendingCancelJob}
+  <div class="modal-layer">
+    <button class="modal-backdrop" aria-label="关闭" on:click={() => { showCancelConfirm = false; pendingCancelJob = null; }}></button>
+    <div class="modal confirm-modal">
+      <div class="modal-header">
+        <h3>确认取消</h3>
+        <p>当前 {pendingCancelJob.job_type === "compare" ? "对比" : "补数"} 任务正在执行，取消后发现的差异仍可查看。</p>
+      </div>
+      <div class="modal-actions">
+        <button class="ghost" on:click={() => { showCancelConfirm = false; pendingCancelJob = null; }}>返回</button>
+        <button class="primary" on:click={doCancel}>确认取消</button>
+      </div>
+    </div>
+  </div>
+{/if}
+
+{#if showFullCompareConfirm}
+  <div class="modal-layer">
+    <button class="modal-backdrop" aria-label="关闭" on:click={() => { showFullCompareConfirm = false; }}></button>
+    <div class="modal confirm-modal">
+      <div class="modal-header">
+        <h3>确认全量对比</h3>
+        <p>将对所有同步表逐行比对源端和目标端数据，表数据量大时可能耗时较长。</p>
+      </div>
+      <div class="modal-actions">
+        <button class="ghost" on:click={() => { showFullCompareConfirm = false; }}>取消</button>
+        <button class="primary" on:click={startFullCompare}>确认发起</button>
+      </div>
+    </div>
+  </div>
+{/if}
+
+{#if showTimeCompareModal}
+  <div class="modal-layer">
+    <button class="modal-backdrop" aria-label="关闭" on:click={() => { showTimeCompareModal = false; }}></button>
+    <div class="modal time-compare-modal">
+      <div class="modal-header">
+        <h3>按时间段补数</h3>
+        <p>勾选要参与对比的表，为每表选择时间筛选字段，统一截止时间</p>
+        <button class="ghost icon" on:click={() => { showTimeCompareModal = false; }}><X size={17} /></button>
+      </div>
+      <div class="repair-toolbar" style="padding:0.75rem 1.25rem;border-bottom:1px solid var(--border);">
+        <label>截止时间<input type="datetime-local" step="1" bind:value={compareCutoffTime} /></label>
+      </div>
+      <table class="data-table">
+        <thead><tr><th style="width:2.5rem">参与</th><th>源表</th><th>目标表</th><th>时间字段</th></tr></thead>
+        <tbody>
+          {#each repairTablePageItems as item}
+            <tr>
+              <td style="text-align:center"><input type="checkbox" bind:checked={item.included} /></td>
+              <td>{item.source_table}</td>
+              <td>{item.target_table}</td>
+              <td>
+                {#if item.allColumns.length === 0}
+                  <button class="link-button" disabled={item.loadingColumns} on:click={() => loadCompareTableColumns(item)}>{item.loadingColumns ? "加载中..." : "加载字段"}</button>
+                {:else}
+                  <select bind:value={item.cutoffColumn}>
+                    {#each item.allColumns as col}<option value={col}>{col}</option>{/each}
+                  </select>
+                {/if}
+              </td>
+            </tr>
+          {/each}
+          {#if compareTables.length === 0}
+            <tr class="empty-row"><td colspan="4"><div class="empty-state"><strong>暂无同步表</strong></div></td></tr>
+          {/if}
+        </tbody>
+      </table>
+      <div class="pager">
+        <button class="ghost" disabled={compareTablePage <= 1} on:click={() => { compareTablePage -= 1; }}><ChevronLeft size={14} />上一页</button>
+        <span>{compareTablePage} / {repairTableTotalPages}</span>
+        <button class="ghost" disabled={compareTablePage >= repairTableTotalPages} on:click={() => { compareTablePage += 1; }}>下一页<ChevronRight size={14} /></button>
+      </div>
+      <div class="modal-actions">
+        <button class="ghost" on:click={() => { showTimeCompareModal = false; }}>取消</button>
+        <button class="primary" disabled={!compareTables.some(t => t.included && t.cutoffColumn) || !compareCutoffTime} on:click={startTimeCompare}>确认发起</button>
+      </div>
+    </div>
+  </div>
+{/if}
 
 {#if diffJob}
   <div class="modal-layer">

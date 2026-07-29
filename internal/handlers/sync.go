@@ -336,9 +336,9 @@ func (h *SyncHandler) PrecheckTask(c *gin.Context) {
 		task, err := h.syncService.GetTask(uint(id))
 		if err == nil {
 			_ = scheduler.GetScheduler().RefreshTask(task)
-			// 只有新建任务（状态为 pending/stopped）才自动启动
-			// 暂停、失败、已完成的任务需要用户手动触发
-			if task.RuntimeStatus == "pending" || task.RuntimeStatus == "stopped" {
+			// 只有新建任务（runtime_status 为 pending）才自动启动
+			// 暂停、停止、失败、完成等状态需要用户手动触发
+			if task.RuntimeStatus == "pending" {
 				if !isTaskRunning(task.RuntimeStatus) {
 					go func(taskID uint) {
 						_ = h.syncService.ExecuteTask(taskID)
@@ -428,8 +428,9 @@ func (h *SyncHandler) ListLogs(c *gin.Context) {
 }
 
 type RepairCompareRequest struct {
-	CutoffTime   string `json:"cutoff_time"`
-	CutoffColumn string `json:"cutoff_column"`
+	CutoffTime   string          `json:"cutoff_time"`
+	CutoffColumn string          `json:"cutoff_column"`
+	TableCutoffs map[uint]string `json:"table_cutoffs,omitempty"`
 }
 
 func (h *SyncHandler) ListRepairJobs(c *gin.Context) {
@@ -449,7 +450,10 @@ func (h *SyncHandler) StartRepairCompare(c *gin.Context) {
 		utils.BadRequest(c, "请求参数错误: "+err.Error())
 		return
 	}
-	compareReq := services.RepairCompareRequest{CutoffColumn: strings.TrimSpace(req.CutoffColumn)}
+	compareReq := services.RepairCompareRequest{
+		CutoffColumn: strings.TrimSpace(req.CutoffColumn),
+		TableCutoffs: req.TableCutoffs,
+	}
 	if strings.TrimSpace(req.CutoffTime) != "" {
 		cutoff, err := parseRepairTime(req.CutoffTime)
 		if err != nil {

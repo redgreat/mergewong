@@ -26,6 +26,8 @@ type RepairService struct {
 type RepairCompareRequest struct {
 	CutoffTime   *time.Time `json:"cutoff_time"`
 	CutoffColumn string     `json:"cutoff_column"`
+	// 每个表独立的时间字段配置，key 为 task_table_id
+	TableCutoffs map[uint]string `json:"table_cutoffs"`
 }
 
 type RepairDiffView struct {
@@ -85,7 +87,7 @@ func (s *RepairService) StartCompare(taskID uint, req RepairCompareRequest) (*mo
 		return nil, err
 	}
 	now := time.Now()
-	job := &models.SyncRepairJob{TaskID: taskID, JobType: "compare", Status: "running", CutoffTime: req.CutoffTime, CutoffColumn: req.CutoffColumn, Message: "正在对比", StartedAt: &now}
+	job := &models.SyncRepairJob{TaskID: taskID, JobType: "compare", Status: "running", CutoffTime: req.CutoffTime, CutoffColumn: req.CutoffColumn, TableCutoffs: req.TableCutoffs, Message: "正在对比", StartedAt: &now}
 	if err := s.systemDB.Create(job).Error; err != nil {
 		return nil, err
 	}
@@ -186,7 +188,14 @@ func (s *RepairService) compareJob(ctx context.Context, job *models.SyncRepairJo
 	}
 	_ = s.systemDB.Where("job_id = ?", job.ID).Delete(&models.SyncRepairDiff{}).Error
 	for i := range task.TaskTables {
-		if err := s.compareTable(ctx, job, task, &task.TaskTables[i], sourceDB, targetDB); err != nil {
+		table := &task.TaskTables[i]
+		// 如果传了 table_cutoffs 但当前表不在其中，说明用户选择了忽略此表
+		if job.TableCutoffs != nil {
+			if _, included := job.TableCutoffs[table.ID]; !included {
+				continue
+			}
+		}
+		if err := s.compareTable(ctx, job, task, table, sourceDB, targetDB); err != nil {
 			return err
 		}
 	}
@@ -206,15 +215,21 @@ func (s *RepairService) compareTable(ctx context.Context, job *models.SyncRepair
 	if err != nil {
 		return err
 	}
+	// 优先使用表级自定义时间字段，其次使用全局 cutoff_column
 	cutoffColumn := ""
-	if job.CutoffTime != nil && job.CutoffColumn != "" && containsString(sourceAllColumns, job.CutoffColumn) {
-		cutoffColumn = job.CutoffColumn
+	if job.CutoffTime != nil {
+		if tableCol, ok := job.TableCutoffs[mapping.ID]; ok && tableCol != "" && containsString(sourceAllColumns, tableCol) {
+			cutoffColumn = tableCol
+		} else if job.CutoffColumn != "" && containsString(sourceAllColumns, job.CutoffColumn) {
+			cutoffColumn = job.CutoffColumn
+		}
 	}
 	sourceTotal, err := countRepairRows(sourceDB, mapping.SourceTable, cutoffColumn, job.CutoffTime)
 	if err != nil {
 		return err
 	}
-	targetTotal, err := countRepairRows(targetDB, mapping.TargetTable, "", nil)
+	// 目标端行数统计也按相同条件过滤，保持两端范围一致
+	targetTotal, err := countRepairRows(targetDB, mapping.TargetTable, cutoffColumn, job.CutoffTime)
 	if err != nil {
 		return err
 	}
@@ -263,7 +278,8 @@ func (s *RepairService) compareTargetExtras(ctx context.Context, job *models.Syn
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		rows, err := readRepairRows(targetDB, mapping.TargetTable, mapping.TargetPrimaryKey, targetPairColumns(pairs), lastPK, "", nil)
+		// 如果指定了截止时间，目标端也只读取该时间段内的数据，避免源端已过期的数据产生伪差异
+		rows, err := readRepairRows(targetDB, mapping.TargetTable, mapping.TargetPrimaryKey, targetPairColumns(pairs), lastPK, cutoffColumn, job.CutoffTime)
 		if err != nil {
 			return err
 		}
@@ -276,10 +292,17 @@ func (s *RepairService) compareTargetExtras(ctx context.Context, job *models.Syn
 		}
 		diffs := make([]models.SyncRepairDiff, 0)
 		for _, row := range rows {
-			lastPK = valueString(row[mapping.TargetPrimaryKey])
-			if sourceRows[lastPK] == nil {
-				diffs = append(diffs, newRepairDiff(job, mapping, lastPK, lastPK, "missing_source", "", hashRepairRow(row, pairs, false), "源端缺少数据"))
+			targetPK := valueString(row[mapping.TargetPrimaryKey])
+			sourceRow := sourceRows[targetPK]
+			if sourceRow == nil {
+				// 目标端有此行但源端没有：如果设了截止时间，说明该行在源端已被 cutoff 过滤掉
+				if cutoffColumn != "" && job.CutoffTime != nil {
+					// 按时间段追数时不把此情况标记为缺失，因为数据在截止时间之前可能已被归档或不存在
+					continue
+				}
+				diffs = append(diffs, newRepairDiff(job, mapping, targetPK, targetPK, "missing_source", "", hashRepairRow(row, pairs, false), "源端缺少数据"))
 			}
+			lastPK = targetPK
 		}
 		if err := s.recordDiffs(job.ID, diffs); err != nil {
 			return err

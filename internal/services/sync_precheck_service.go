@@ -245,7 +245,9 @@ func (s *SyncService) PrecheckTask(taskID uint) (*PrecheckResult, error) {
 					return err
 				}
 			}
-			return tx.Model(&models.SyncTask{}).Where("id = ?", task.ID).Updates(map[string]interface{}{"validation_status": "passed", "status": 1, "runtime_status": "stopped"}).Error
+			// 预检查通过只更新验证状态和启用状态，不覆盖 runtime_status
+			// 保持原有的 paused/stopped/failed/completed 状态，由用户手动决定是否启动
+			return tx.Model(&models.SyncTask{}).Where("id = ?", task.ID).Updates(map[string]interface{}{"validation_status": "passed", "status": 1}).Error
 		})
 		if err != nil {
 			return nil, err
