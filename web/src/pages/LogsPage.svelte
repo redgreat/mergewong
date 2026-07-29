@@ -43,24 +43,26 @@
     <div></div>
     <div class="header-actions"><button class="ghost icon-text" on:click={onRefresh}><RefreshCw size={15} />刷新</button></div>
   </div>
-  <div class="toolbar">
-    <div class="task-search">
-      <label>查询任务<input type="search" placeholder="输入任务名称" bind:value={taskQuery} on:focus={() => (resultsOpen = true)} /></label>
-      {#if resultsOpen}
-        <div class="search-results">
-          <button class:active={!logTaskId} on:click={() => chooseTask(null)}>全部任务</button>
-          {#each filteredTasks as task}<button class:active={String(task.id) === String(logTaskId)} on:click={() => chooseTask(task)}>{task.name}</button>{/each}
-          {#if filteredTasks.length === 0}<span>没有匹配任务</span>{/if}
-        </div>
-      {/if}
-    </div>
-    <div class="date-filter">
-      <label>开始<input type="datetime-local" bind:value={logDateFrom} /></label>
-      <label>结束<input type="datetime-local" bind:value={logDateTo} /></label>
-      <button class="ghost icon-text" on:click={handleFilter}><Search size={14} />筛选</button>
-    </div>
-    <div class="toolbar-right">
-      <span class="record-count">共 {logTotal} 条记录</span>
+  <div class="toolbar log-toolbar">
+    <div class="toolbar-row">
+      <div class="task-search">
+        <label>查询任务<input type="search" placeholder="输入任务名称" bind:value={taskQuery} on:focus={() => (resultsOpen = true)} /></label>
+        {#if resultsOpen}
+          <div class="search-results">
+            <button class:active={!logTaskId} on:click={() => chooseTask(null)}>全部任务</button>
+            {#each filteredTasks as task}<button class:active={String(task.id) === String(logTaskId)} on:click={() => chooseTask(task)}>{task.name}</button>{/each}
+            {#if filteredTasks.length === 0}<span>没有匹配任务</span>{/if}
+          </div>
+        {/if}
+      </div>
+      <div class="date-filter">
+        <label>开始<input type="datetime-local" bind:value={logDateFrom} /></label>
+        <label>结束<input type="datetime-local" bind:value={logDateTo} /></label>
+        <button class="ghost icon-text" on:click={handleFilter}><Search size={14} />筛选</button>
+      </div>
+      <div class="toolbar-right">
+        <span class="record-count">共 {logTotal} 条记录</span>
+      </div>
     </div>
   </div>
   <table class="data-table">
@@ -104,10 +106,32 @@
 </section>
 
 <style>
+  .log-toolbar {
+    overflow: visible;
+  }
+  .toolbar-row {
+    display: flex;
+    flex-wrap: nowrap;
+    align-items: center;
+    gap: 0.75rem;
+    width: 100%;
+  }
+  .task-search {
+    flex: 0 0 auto;
+    min-width: 12rem;
+    max-width: 16rem;
+  }
+  .task-search label {
+    white-space: nowrap;
+  }
+  .task-search input {
+    width: 100%;
+  }
   .date-filter {
     display: flex;
     align-items: center;
     gap: 0.5rem;
+    flex: 0 0 auto;
   }
   .date-filter label {
     font-size: 0.8125rem;
@@ -115,6 +139,7 @@
     display: flex;
     align-items: center;
     gap: 0.25rem;
+    white-space: nowrap;
   }
   .date-filter input {
     padding: 0.3rem 0.5rem;
@@ -123,6 +148,11 @@
     background: var(--bg-primary);
     color: var(--text-primary);
     font-size: 0.8125rem;
-    max-width: 11rem;
+    width: 10.5rem;
+  }
+  .toolbar-right {
+    flex: 0 0 auto;
+    margin-left: auto;
+    white-space: nowrap;
   }
 </style>
