@@ -570,7 +570,12 @@
         editingTaskId = createdTask.id;
       }
       taskPrecheckResult = await request(`/api/sync/tasks/${editingTaskId}/precheck`, { method: "POST", token });
-      setMessage(taskPrecheckResult.passed ? "任务预检查通过" : "任务已保存，但预检查存在阻断项", taskPrecheckResult.passed ? "info" : "error");
+      // 编辑后不自动启动任务，由用户手动触发
+      if (taskPrecheckResult.passed && !editingTaskId) {
+        setMessage("任务预检查通过并已自动开始", "info");
+      } else {
+        setMessage(taskPrecheckResult.passed ? "任务已保存，预检查通过，等待手动启动" : "任务已保存，但预检查存在阻断项", taskPrecheckResult.passed ? "info" : "error");
+      }
       await loadTasks();
     } catch (error) {
       setMessage(error.message, "error");

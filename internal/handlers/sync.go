@@ -331,14 +331,20 @@ func (h *SyncHandler) PrecheckTask(c *gin.Context) {
 		utils.InternalServerError(c, "预检查失败: "+err.Error())
 		return
 	}
+	autoStarted := false
 	if result.Passed {
 		task, err := h.syncService.GetTask(uint(id))
 		if err == nil {
 			_ = scheduler.GetScheduler().RefreshTask(task)
-			if !isTaskRunning(task.RuntimeStatus) {
-				go func(taskID uint) {
-					_ = h.syncService.ExecuteTask(taskID)
-				}(task.ID)
+			// 只有新建任务（状态为 pending/stopped）才自动启动
+			// 暂停、失败、已完成的任务需要用户手动触发
+			if task.RuntimeStatus == "pending" || task.RuntimeStatus == "stopped" {
+				if !isTaskRunning(task.RuntimeStatus) {
+					go func(taskID uint) {
+						_ = h.syncService.ExecuteTask(taskID)
+					}(task.ID)
+					autoStarted = true
+				}
 			}
 		}
 	}
@@ -347,7 +353,11 @@ func (h *SyncHandler) PrecheckTask(c *gin.Context) {
 		message := "任务预检查未通过"
 		if result.Passed {
 			status = "success"
-			message = "任务预检查通过并已自动开始"
+			if autoStarted {
+				message = "任务预检查通过并已自动开始"
+			} else {
+				message = "任务预检查通过"
+			}
 		}
 		h.syncService.RecordTaskEvent(task, "precheck", "precheck", status, message, "", 0, 0)
 	}
