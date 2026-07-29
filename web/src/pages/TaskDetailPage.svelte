@@ -364,7 +364,6 @@
       <div><h2>数据修复</h2><p>按当前字段映射和忽略字段执行源端到目标端的一致性对比与补数。</p></div>
       {#if canManage}
         <div class="header-actions">
-          {#if runningJob}<button class="ghost icon-text" disabled={repairBusy} on:click={() => cancelRepair(runningJob)}><X size={15}/>取消</button>{/if}
           <button class="ghost icon-text" disabled={repairBusy || !!runningJob} on:click={startCompare}><ShieldAlert size={15}/>全量对比</button>
         </div>
       {/if}
@@ -396,7 +395,7 @@
             <td>{job.repaired_rows || 0}</td>
             <td>{job.error_detail || job.message || "-"}</td>
             <td>{job.started_at ? new Date(job.started_at).toLocaleString() : "-"}</td>
-            {#if canManage}<td>{#if canRepairJob(job)}<button class="ghost icon-text" disabled={repairBusy || !!runningJob} on:click={() => startRepair(job)}><RotateCw size={14}/>补这次</button>{:else}-{/if}</td>{/if}
+            {#if canManage}<td>{#if canRepairJob(job)}<button class="ghost icon-text" disabled={repairBusy || !!runningJob} on:click={() => startRepair(job)}><RotateCw size={14}/>补这次</button>{:else if job.status === "running" || job.status === "canceling"}<button class="ghost icon-text" disabled={repairBusy} on:click={() => cancelRepair(job)}><X size={14}/>取消</button>{:else}-{/if}</td>{/if}
           </tr>
         {/each}
       </tbody>

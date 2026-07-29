@@ -4,6 +4,22 @@
   let resultsOpen = false;
   $: filteredTasks = tasks.filter((task) => task.name.toLowerCase().includes(taskQuery.trim().toLowerCase())).slice(0, 8);
 
+  function todayString() {
+    const d = new Date();
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, "0");
+    const day = String(d.getDate()).padStart(2, "0");
+    return `${y}-${m}-${day}`;
+  }
+  function yesterdayString() {
+    const d = new Date();
+    d.setDate(d.getDate() - 1);
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, "0");
+    const day = String(d.getDate()).padStart(2, "0");
+    return `${y}-${m}-${day}`;
+  }
+
   function chooseTask(task) {
     logTaskId = task ? String(task.id) : "";
     taskQuery = task ? task.name : "";
@@ -56,9 +72,15 @@
         {/if}
       </div>
       <div class="date-filter">
-        <label>开始<input type="datetime-local" bind:value={logDateFrom} /></label>
-        <label>结束<input type="datetime-local" bind:value={logDateTo} /></label>
-        <button class="ghost icon-text" on:click={handleFilter}><Search size={14} />筛选</button>
+        <div class="date-field">
+          <span class="date-label">从</span>
+          <input type="date" bind:value={logDateFrom} class="date-input" />
+        </div>
+        <div class="date-field">
+          <span class="date-label">至</span>
+          <input type="date" bind:value={logDateTo} class="date-input" />
+        </div>
+        <button class="ghost icon-text filter-btn" on:click={handleFilter}><Search size={14} />筛选</button>
       </div>
       <div class="toolbar-right">
         <span class="record-count">共 {logTotal} 条记录</span>
@@ -118,8 +140,8 @@
   }
   .task-search {
     flex: 0 0 auto;
-    min-width: 12rem;
-    max-width: 16rem;
+    min-width: 11rem;
+    max-width: 14rem;
   }
   .task-search label {
     white-space: nowrap;
@@ -133,22 +155,38 @@
     gap: 0.5rem;
     flex: 0 0 auto;
   }
-  .date-filter label {
-    font-size: 0.8125rem;
-    color: var(--text-secondary);
+  .date-field {
     display: flex;
     align-items: center;
     gap: 0.25rem;
-    white-space: nowrap;
   }
-  .date-filter input {
-    padding: 0.3rem 0.5rem;
+  .date-label {
+    font-size: 0.8125rem;
+    color: var(--text-secondary);
+    white-space: nowrap;
+    width: 1.2rem;
+    text-align: right;
+  }
+  .date-input {
+    padding: 0.35rem 0.5rem;
     border: 1px solid var(--border);
     border-radius: 0.5rem;
     background: var(--bg-primary);
     color: var(--text-primary);
     font-size: 0.8125rem;
-    width: 10.5rem;
+    width: 8.5rem;
+    height: 1.8rem;
+    box-sizing: border-box;
+  }
+  .date-input:focus {
+    border-color: var(--accent);
+    outline: none;
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 30%, transparent);
+  }
+  .filter-btn {
+    height: 1.8rem;
+    padding: 0 0.6rem;
+    font-size: 0.8125rem;
   }
   .toolbar-right {
     flex: 0 0 auto;
