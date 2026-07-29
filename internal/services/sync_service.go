@@ -81,9 +81,6 @@ func (s *SyncService) ReplaceTaskTables(taskID uint, tables []models.SyncTaskTab
 		return err
 	}
 	return s.systemDB.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Where("task_id = ?", taskID).Delete(&models.SyncCDCCheckpoint{}).Error; err != nil {
-			return err
-		}
 		if err := tx.Where("task_table_id IN (?)", tx.Model(&models.SyncTaskTable{}).Select("id").Where("task_id = ?", taskID)).Delete(&models.SyncCheckpoint{}).Error; err != nil {
 			return err
 		}
@@ -96,7 +93,7 @@ func (s *SyncService) ReplaceTaskTables(taskID uint, tables []models.SyncTaskTab
 		if err := tx.Create(&tables).Error; err != nil {
 			return err
 		}
-		updates := map[string]interface{}{"source_table": tables[0].SourceTable, "target_table": tables[0].TargetTable, "field_mapping": tables[0].FieldMapping, "status": 0, "validation_status": "pending", "runtime_status": "pending"}
+		updates := map[string]interface{}{"source_table": tables[0].SourceTable, "target_table": tables[0].TargetTable, "field_mapping": tables[0].FieldMapping, "validation_status": "pending"}
 		return tx.Model(&models.SyncTask{}).Where("id = ?", taskID).Updates(updates).Error
 	})
 }

@@ -32,6 +32,8 @@
   let showUserModal = false;
   let showPasswordModal = false;
   let showAlertModal = false;
+  let showReinitConfirm = false;
+  let pendingReinitTask = null;
   $: isAdmin = currentUser.role === "admin";
 
   let loginForm = {
@@ -480,7 +482,7 @@
     };
   }
 
-  async function saveTask() {
+  async function saveTask(forceReinit = false) {
     try {
       savingTask = true;
       const normalizeFieldMapping = (mapping = {}) => {
@@ -529,6 +531,16 @@
 	  payload.target_table = payload.tables[0].target_table;
 
       if (editingTaskId) {
+        const currentTask = tasks.find(t => String(t.id) === String(editingTaskId));
+        const hasCheckpoint = currentTask?.cdc_checkpoint?.binlog_file;
+        const tablesChanged = JSON.stringify(currentTask?.task_tables?.map(t => t.source_table + t.target_table).sort()) !== JSON.stringify(payload.tables.map(t => t.source_table + t.target_table).sort());
+        // 如果已有检查点且修改了表，需要弹窗确认重新初始化
+        if (hasCheckpoint && tablesChanged && !forceReinit) {
+          pendingReinitTask = { id: editingTaskId, payload };
+          showReinitConfirm = true;
+          savingTask = false;
+          return;
+        }
         await request(`/api/sync/tasks/${editingTaskId}`, {
           method: "PUT",
           token,
@@ -543,7 +555,7 @@
         editingTaskId = createdTask.id;
       }
       taskPrecheckResult = await request(`/api/sync/tasks/${editingTaskId}/precheck`, { method: "POST", token });
-      setMessage(taskPrecheckResult.passed ? "任务预检查通过并已自动开始" : "任务已保存，但预检查存在阻断项", taskPrecheckResult.passed ? "info" : "error");
+      setMessage(taskPrecheckResult.passed ? "任务预检查通过" : "任务已保存，但预检查存在阻断项", taskPrecheckResult.passed ? "info" : "error");
       await loadTasks();
     } catch (error) {
       setMessage(error.message, "error");
@@ -786,6 +798,27 @@
     <PasswordModal open={showPasswordModal} form={passwordForm} onClose={() => (showPasswordModal = false)} onSave={changePassword} />
     <AlertModal open={showAlertModal} editing={!!editingAlertId} form={alertForm} onClose={closeAlertModal} onSave={saveAlert} />
   </main>
+
+{#if showReinitConfirm}
+  <div class="modal-layer">
+    <button class="modal-backdrop" aria-label="关闭" on:click={() => { showReinitConfirm = false; pendingReinitTask = null; }}></button>
+    <div class="modal confirm-modal">
+      <div class="modal-header">
+        <h3>确认重新初始化</h3>
+        <p>修改同步表后需要重新执行全量初始化，已有的 CDC 检查点将被重置。确定继续？</p>
+      </div>
+      <div class="modal-actions">
+        <button class="ghost" on:click={() => { showReinitConfirm = false; pendingReinitTask = null; }}>取消</button>
+        <button class="primary" on:click={async () => {
+          showReinitConfirm = false;
+          const task = pendingReinitTask;
+          pendingReinitTask = null;
+          await saveTask(true);
+        }}>确定重新初始化</button>
+      </div>
+    </div>
+  </div>
+{/if}
 </div>
 {/if}
 

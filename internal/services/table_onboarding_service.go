@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"fmt"
+	"log"
 	"reflect"
 	"strings"
 	"time"
@@ -251,18 +252,6 @@ func (s *SyncService) catchupTables(task *models.SyncTask, tables []models.SyncT
 }
 
 func (s *SyncService) ResumePendingTableOnboarding() {
-	var taskIDs []uint
-	states := []string{"initializing", "snapshot_completed", "catching_up"}
-	runningStates := []string{"initializing", "catching_up", "cdc_running"}
-	_ = s.systemDB.Model(&models.SyncTaskTable{}).
-		Joins("JOIN sync_tasks ON sync_tasks.id = sync_task_tables.task_id").
-		Where("COALESCE(sync_task_tables.onboarding_file, '') <> '' AND sync_task_tables.sync_state IN ? AND sync_tasks.runtime_status IN ?", states, runningStates).
-		Distinct().Pluck("sync_task_tables.task_id", &taskIDs).Error
-	for _, taskID := range taskIDs {
-		var ids []uint
-		_ = s.systemDB.Model(&models.SyncTaskTable{}).Where("task_id = ? AND COALESCE(onboarding_file, '') <> '' AND sync_state IN ?", taskID, states).Pluck("id", &ids).Error
-		if len(ids) > 0 {
-			go s.runTableOnboarding(taskID, ids)
-		}
-	}
+	// 启动后不再自动恢复在线加表，由用户手动触发
+	log.Println("在线加表恢复已禁用，等待用户手动触发")
 }

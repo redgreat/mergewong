@@ -118,15 +118,8 @@ func GetCDCManager() *CDCManager {
 }
 
 func (m *CDCManager) StartAll() {
-	var tasks []models.SyncTask
-	runningStates := []string{"initializing", "catching_up", "cdc_running"}
-	if err := m.service.systemDB.Where("status = ? AND validation_status = ? AND sync_type IN ? AND runtime_status IN ?", 1, "passed", []string{"cdc", "full_cdc"}, runningStates).Find(&tasks).Error; err != nil {
-		log.Printf("加载 CDC 任务失败: %v", err)
-		return
-	}
-	for _, task := range tasks {
-		_ = m.StartTask(task.ID)
-	}
+	// 启动后不再自动恢复 CDC 任务，由用户手动开启
+	log.Println("CDC Manager 已就绪，等待用户手动启动任务")
 }
 
 func (m *CDCManager) StartTask(taskID uint) error {
@@ -840,6 +833,11 @@ func xaKeySuffix(xidKey string) (string, bool) {
 	return parts[1], true
 }
 
+// cdcMaxBatchRows 控制 CDC 单次批量写入的最大行数，避免超过 MySQL 参数占位符上限
+// MySQL 默认 max_prepared_stmt_count=16382，每个占位符对应一个 ?
+// 普通列数按 50 列估算，单批次上限约 300 行足够安全
+const cdcMaxBatchRows = 500
+
 func applyCDCTransaction(db *gorm.DB, operations []cdcOperation) error {
 	if len(operations) == 0 {
 		return nil
@@ -870,8 +868,15 @@ func applyCDCTransaction(db *gorm.DB, operations []cdcOperation) error {
 	}
 	return db.Transaction(func(tx *gorm.DB) error {
 		for _, g := range groups {
-			if err := writeMySQLBatchTx(tx, g.mapping, g.columns, g.rows); err != nil {
-				return err
+			rows := g.rows
+			for start := 0; start < len(rows); start += cdcMaxBatchRows {
+				end := start + cdcMaxBatchRows
+				if end > len(rows) {
+					end = len(rows)
+				}
+				if err := writeMySQLBatchTx(tx, g.mapping, g.columns, rows[start:end]); err != nil {
+					return err
+				}
 			}
 		}
 		for _, op := range deletes {
