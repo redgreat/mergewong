@@ -137,17 +137,24 @@
     align-items: center;
     gap: 0.75rem;
     width: 100%;
+    min-width: 0;
   }
   .task-search {
     flex: 0 0 auto;
-    min-width: 11rem;
-    max-width: 14rem;
+    min-width: 14rem;
+    max-width: 18rem;
   }
   .task-search label {
+    display: flex !important;
+    flex-direction: row !important;
+    align-items: center;
+    gap: 0.5rem;
     white-space: nowrap;
+    font-size: 0.8125rem;
   }
   .task-search input {
-    width: 100%;
+    flex: 1;
+    min-width: 8rem;
   }
   .date-filter {
     display: flex;
