@@ -25,6 +25,7 @@ type RepairService struct {
 
 type RepairCompareRequest struct {
 	CutoffTime   *time.Time `json:"cutoff_time"`
+	CutoffFrom   *time.Time `json:"cutoff_from,omitempty"`
 	CutoffColumn string     `json:"cutoff_column"`
 	// 每个表独立的时间字段配置，key 为 task_table_id
 	TableCutoffs map[uint]string `json:"table_cutoffs"`
@@ -87,7 +88,7 @@ func (s *RepairService) StartCompare(taskID uint, req RepairCompareRequest) (*mo
 		return nil, err
 	}
 	now := time.Now()
-	job := &models.SyncRepairJob{TaskID: taskID, JobType: "compare", Status: "running", CutoffTime: req.CutoffTime, CutoffColumn: req.CutoffColumn, TableCutoffs: req.TableCutoffs, Message: "正在对比", StartedAt: &now}
+	job := &models.SyncRepairJob{TaskID: taskID, JobType: "compare", Status: "running", CutoffTime: req.CutoffTime, CutoffFrom: req.CutoffFrom, CutoffColumn: req.CutoffColumn, TableCutoffs: req.TableCutoffs, Message: "正在对比", StartedAt: &now}
 	if err := s.systemDB.Create(job).Error; err != nil {
 		return nil, err
 	}
@@ -217,19 +218,19 @@ func (s *RepairService) compareTable(ctx context.Context, job *models.SyncRepair
 	}
 	// 优先使用表级自定义时间字段，其次使用全局 cutoff_column
 	cutoffColumn := ""
-	if job.CutoffTime != nil {
+	if job.CutoffTime != nil || job.CutoffFrom != nil {
 		if tableCol, ok := job.TableCutoffs[mapping.ID]; ok && tableCol != "" && containsString(sourceAllColumns, tableCol) {
 			cutoffColumn = tableCol
 		} else if job.CutoffColumn != "" && containsString(sourceAllColumns, job.CutoffColumn) {
 			cutoffColumn = job.CutoffColumn
 		}
 	}
-	sourceTotal, err := countRepairRows(sourceDB, mapping.SourceTable, cutoffColumn, job.CutoffTime)
+	sourceTotal, err := countRepairRowsRange(sourceDB, mapping.SourceTable, cutoffColumn, job.CutoffFrom, job.CutoffTime)
 	if err != nil {
 		return err
 	}
-	// 目标端行数统计也按相同条件过滤，保持两端范围一致
-	targetTotal, err := countRepairRows(targetDB, mapping.TargetTable, cutoffColumn, job.CutoffTime)
+	// 目标端行数统计也按相同条件过滤
+	targetTotal, err := countRepairRowsRange(targetDB, mapping.TargetTable, cutoffColumn, job.CutoffFrom, job.CutoffTime)
 	if err != nil {
 		return err
 	}
@@ -239,7 +240,7 @@ func (s *RepairService) compareTable(ctx context.Context, job *models.SyncRepair
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		rows, err := readRepairRows(sourceDB, mapping.SourceTable, mapping.SourcePrimaryKey, sourcePairColumns(pairs), lastPK, cutoffColumn, job.CutoffTime)
+		rows, err := readRepairRowsRange(sourceDB, mapping.SourceTable, mapping.SourcePrimaryKey, sourcePairColumns(pairs), lastPK, cutoffColumn, job.CutoffFrom, job.CutoffTime)
 		if err != nil {
 			return err
 		}
@@ -278,8 +279,8 @@ func (s *RepairService) compareTargetExtras(ctx context.Context, job *models.Syn
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		// 如果指定了截止时间，目标端也只读取该时间段内的数据，避免源端已过期的数据产生伪差异
-		rows, err := readRepairRows(targetDB, mapping.TargetTable, mapping.TargetPrimaryKey, targetPairColumns(pairs), lastPK, cutoffColumn, job.CutoffTime)
+		// 目标端也按相同时间段过滤
+		rows, err := readRepairRowsRange(targetDB, mapping.TargetTable, mapping.TargetPrimaryKey, targetPairColumns(pairs), lastPK, cutoffColumn, job.CutoffFrom, job.CutoffTime)
 		if err != nil {
 			return err
 		}
@@ -295,11 +296,7 @@ func (s *RepairService) compareTargetExtras(ctx context.Context, job *models.Syn
 			targetPK := valueString(row[mapping.TargetPrimaryKey])
 			sourceRow := sourceRows[targetPK]
 			if sourceRow == nil {
-				// 目标端有此行但源端没有：如果设了截止时间，说明该行在源端已被 cutoff 过滤掉
-				if cutoffColumn != "" && job.CutoffTime != nil {
-					// 按时间段追数时不把此情况标记为缺失，因为数据在截止时间之前可能已被归档或不存在
-					continue
-				}
+				// 按时间段追数时，源端在时间范围内的数据不应缺失；全量对比则标记
 				diffs = append(diffs, newRepairDiff(job, mapping, targetPK, targetPK, "missing_source", "", hashRepairRow(row, pairs, false), "源端缺少数据"))
 			}
 			lastPK = targetPK
@@ -522,11 +519,25 @@ func (s *RepairService) bumpJobProgress(jobID uint, processed, diffs, repaired i
 }
 
 func countRepairRows(db *gorm.DB, table, cutoffColumn string, cutoffTime *time.Time) (int64, error) {
+	return countRepairRowsRange(db, table, cutoffColumn, nil, cutoffTime)
+}
+
+func countRepairRowsRange(db *gorm.DB, table, cutoffColumn string, fromTime, toTime *time.Time) (int64, error) {
 	query := "SELECT COUNT(*) AS cnt FROM " + quoteMySQL(table)
 	params := []interface{}{}
-	if cutoffTime != nil && cutoffColumn != "" {
-		query += " WHERE " + quoteMySQL(cutoffColumn) + " <= ?"
-		params = append(params, *cutoffTime)
+	wheres := []string{}
+	if cutoffColumn != "" {
+		if fromTime != nil {
+			wheres = append(wheres, quoteMySQL(cutoffColumn)+" >= ?")
+			params = append(params, *fromTime)
+		}
+		if toTime != nil {
+			wheres = append(wheres, quoteMySQL(cutoffColumn)+" <= ?")
+			params = append(params, *toTime)
+		}
+	}
+	if len(wheres) > 0 {
+		query += " WHERE " + strings.Join(wheres, " AND ")
 	}
 	var count int64
 	if err := db.Raw(query, params...).Scan(&count).Error; err != nil {
@@ -536,6 +547,10 @@ func countRepairRows(db *gorm.DB, table, cutoffColumn string, cutoffTime *time.T
 }
 
 func readRepairRows(db *gorm.DB, table, pk string, columns []string, lastPK, cutoffColumn string, cutoffTime *time.Time) ([]map[string]interface{}, error) {
+	return readRepairRowsRange(db, table, pk, columns, lastPK, cutoffColumn, nil, cutoffTime)
+}
+
+func readRepairRowsRange(db *gorm.DB, table, pk string, columns []string, lastPK, cutoffColumn string, fromTime, toTime *time.Time) ([]map[string]interface{}, error) {
 	selectList := quotedColumns(columns)
 	query := "SELECT " + strings.Join(selectList, ",") + " FROM " + quoteMySQL(table)
 	params := []interface{}{}
@@ -544,9 +559,15 @@ func readRepairRows(db *gorm.DB, table, pk string, columns []string, lastPK, cut
 		wheres = append(wheres, quoteMySQL(pk)+" > ?")
 		params = append(params, lastPK)
 	}
-	if cutoffTime != nil && cutoffColumn != "" {
-		wheres = append(wheres, quoteMySQL(cutoffColumn)+" <= ?")
-		params = append(params, *cutoffTime)
+	if cutoffColumn != "" {
+		if fromTime != nil {
+			wheres = append(wheres, quoteMySQL(cutoffColumn)+" >= ?")
+			params = append(params, *fromTime)
+		}
+		if toTime != nil {
+			wheres = append(wheres, quoteMySQL(cutoffColumn)+" <= ?")
+			params = append(params, *toTime)
+		}
 	}
 	if len(wheres) > 0 {
 		query += " WHERE " + strings.Join(wheres, " AND ")

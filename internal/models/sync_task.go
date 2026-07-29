@@ -238,6 +238,7 @@ type SyncRepairJob struct {
 	Status          string          `gorm:"size:20;not null;index" json:"status"`   // running, canceling, canceled, success, failed
 	SourceJobID     uint            `gorm:"index" json:"source_job_id"`
 	CutoffTime      *time.Time      `json:"cutoff_time"`
+	CutoffFrom      *time.Time      `json:"cutoff_from,omitempty"`
 	CutoffColumn    string          `gorm:"size:100" json:"cutoff_column"`
 	TableCutoffs    map[uint]string `gorm:"type:json" json:"table_cutoffs,omitempty"`
 	TotalRows       int64           `gorm:"not null;default:0" json:"total_rows"`

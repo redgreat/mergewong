@@ -429,6 +429,7 @@ func (h *SyncHandler) ListLogs(c *gin.Context) {
 
 type RepairCompareRequest struct {
 	CutoffTime   string          `json:"cutoff_time"`
+	CutoffFrom   string          `json:"cutoff_from,omitempty"`
 	CutoffColumn string          `json:"cutoff_column"`
 	TableCutoffs map[uint]string `json:"table_cutoffs,omitempty"`
 }
@@ -461,6 +462,14 @@ func (h *SyncHandler) StartRepairCompare(c *gin.Context) {
 			return
 		}
 		compareReq.CutoffTime = &cutoff
+	}
+	if strings.TrimSpace(req.CutoffFrom) != "" {
+		from, err := parseRepairTime(req.CutoffFrom)
+		if err != nil {
+			utils.BadRequest(c, "开始时间格式错误")
+			return
+		}
+		compareReq.CutoffFrom = &from
 	}
 	job, err := services.NewRepairService().StartCompare(uint(id), compareReq)
 	if err != nil {

@@ -35,18 +35,15 @@
   let activeDelayIndex = null;
   let activeRowsIndex = null;
   let loadedMetricTaskId = 0;
-  let cutoffColumn = "LastUpdateTime";
-  let cutoffTime = "";
-  let timeColumns = [];
-  let cutoffColumnError = "";
-  let loadedCutoffTaskId = 0;
   let repairBusy = false;
   let detailRefreshing = false;
   let showCancelConfirm = false;
   let pendingCancelJob = null;
   let showFullCompareConfirm = false;
   let showTimeCompareModal = false;
-  let compareCutoffTime = "";
+  let compareTimeFrom = "";
+  let compareTimeTo = "";
+  let timeCompareError = "";
   // 按时间段补数弹窗配置
   let compareTables = [];
   let compareTablePage = 1;
@@ -70,11 +67,6 @@
     loadedMetricTaskId = task.id;
     setMetricRange("24h", false);
     loadMetrics();
-  }
-  $: if (task.id && token && loadedCutoffTaskId !== task.id) {
-    loadedCutoffTaskId = task.id;
-    cutoffTime = toLocalDateTimeInput(new Date());
-    loadCutoffColumns();
   }
   function toLocalDateTimeInput(date) {
     const pad = (value) => String(value).padStart(2, "0");
@@ -182,36 +174,13 @@
       detailRefreshing = false;
     }
   }
-  const columnName = (column) => column.Field || column.field || column.COLUMN_NAME || column.column_name || "";
-  const columnType = (column) => column.Type || column.type || column.DATA_TYPE || column.data_type || "";
-  function preferredTimeColumn(columns) {
-    return columns.find((name) => name === "LastUpdateTime")
-      || columns.find((name) => name === "UpdatedAt" || name === "UpdateTime" || name === "updated_at")
-      || columns[0]
-      || cutoffColumn;
-  }
-  async function loadCutoffColumns() {
-    const firstTable = task.task_tables?.[0]?.source_table;
-    if (!firstTable || !task.source_db) return;
-    try {
-      const schema = await request(`/api/db/${encodeURIComponent(task.source_db)}/table/${encodeURIComponent(firstTable)}/schema`, { token });
-      const columns = (schema || []).filter((column) => /(date|time|timestamp)/i.test(columnType(column))).map(columnName).filter(Boolean);
-      timeColumns = columns;
-      cutoffColumnError = "";
-      if (columns.length > 0 && !columns.includes(cutoffColumn)) {
-        cutoffColumn = preferredTimeColumn(columns);
-      }
-    } catch (err) {
-      cutoffColumnError = err.message;
-    }
+  function canRepairJob(job) {
+    return canManage && job.job_type === "compare" && job.status === "success" && Number(job.diff_rows || 0) > 0;
   }
   async function loadRepairJobs() {
     if (!task.id || !token) return;
     try { repairJobs = await request(`/api/sync/tasks/${task.id}/repair/jobs`, { token }); repairError = ""; }
     catch (err) { repairError = err.message; }
-  }
-  function canRepairJob(job) {
-    return canManage && job.job_type === "compare" && job.status === "success" && Number(job.diff_rows || 0) > 0;
   }
   function valueText(value) {
     if (value === null || value === undefined) return "NULL";
@@ -281,6 +250,27 @@
   $: repairTableTotalPages = repairTablePageCount();
   $: repairTablePageItems = compareTables.slice((compareTablePage - 1) * compareTablePageSize, compareTablePage * compareTablePageSize);
 
+  function yesterdayLocalString() {
+    const d = new Date();
+    d.setDate(d.getDate() - 1);
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, "0");
+    const day = String(d.getDate()).padStart(2, "0");
+    const h = String(d.getHours()).padStart(2, "0");
+    const min = String(d.getMinutes()).padStart(2, "0");
+    const s = String(d.getSeconds()).padStart(2, "0");
+    return `${y}-${m}-${day}T${h}:${min}:${s}`;
+  }
+  function nowLocalString() {
+    const d = new Date();
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, "0");
+    const day = String(d.getDate()).padStart(2, "0");
+    const h = String(d.getHours()).padStart(2, "0");
+    const min = String(d.getMinutes()).padStart(2, "0");
+    const s = String(d.getSeconds()).padStart(2, "0");
+    return `${y}-${m}-${day}T${h}:${min}:${s}`;
+  }
   async function openTimeCompare() {
     if (!task.id || repairBusy) return;
     repairBusy = true;
@@ -289,11 +279,13 @@
       const items = [];
       for (let i = 0; i < tables.length; i++) {
         const t = tables[i];
-        items.push({ index: i, source_table: t.source_table, target_table: t.target_table, task_table_id: t.id, included: true, cutoffColumn: "", allColumns: [], loadingColumns: false });
+        items.push({ index: i, source_table: t.source_table, target_table: t.target_table, task_table_id: t.id, included: true, cutoffColumn: "", allColumns: [], loadingColumns: false, colsLoaded: false });
       }
       compareTables = items;
       compareTablePage = 1;
-      compareCutoffTime = new Date().toISOString().slice(0, 16);
+      compareTimeFrom = yesterdayLocalString();
+      compareTimeTo = nowLocalString();
+      timeCompareError = "";
       showTimeCompareModal = true;
       repairBusy = false;
     } catch (err) { repairError = err.message; repairBusy = false; }
@@ -301,43 +293,67 @@
 
   // 加载指定表的时间字段
   async function loadCompareTableColumns(tableItem) {
-    if (!task.id || tableItem.loadingColumns || tableItem.allColumns.length > 0) return;
+    if (!task.id || tableItem.loadingColumns || tableItem.colsLoaded) return;
     tableItem.loadingColumns = true;
     try {
       const connName = task.source_db;
       const schema = await request(`/api/db/${encodeURIComponent(connName)}/table/${encodeURIComponent(tableItem.source_table)}/schema`, { token });
-      const cols = (schema.columns || []).filter(c => {
-        const t = (c.type || "").toLowerCase();
-        return t.includes("time") || t.includes("date") || t.includes("timestamp") || t === "datetime" || c.name.toLowerCase().includes("time") || c.name.toLowerCase().includes("date");
-      }).map(c => c.name);
+      const columns = schema.columns || schema || [];
+      const cols = columns.filter(c => {
+        const t = (c.type || c.DATA_TYPE || "").toLowerCase();
+        const n = (c.name || c.Field || c.COLUMN_NAME || "").toLowerCase();
+        return t.includes("time") || t.includes("date") || t.includes("timestamp") || n.includes("time") || n.includes("date");
+      }).map(c => c.name || c.Field || c.COLUMN_NAME || "");
       tableItem.allColumns = cols;
+      tableItem.colsLoaded = true;
       if (cols.length > 0) tableItem.cutoffColumn = cols[0];
     } catch (err) { /* ignore */ }
     finally { tableItem.loadingColumns = false; }
   }
+  // 翻页时自动加载可见表的时间字段
+  $: if (showTimeCompareModal && repairTablePageItems.length > 0) {
+    for (const item of repairTablePageItems) {
+      if (!item.colsLoaded && !item.loadingColumns) {
+        loadCompareTableColumns(item);
+      }
+    }
+  }
 
-  function normalizeDatetimeLocal(value) {
-    if (!value) return "";
-    const d = new Date(value);
-    if (isNaN(d.getTime())) return "";
-    return d.toISOString();
+  function validateTimeRange(from, to) {
+    if (!from || !to) return "请填写开始和结束时间";
+    const fd = new Date(from);
+    const td = new Date(to);
+    const now = new Date();
+    if (isNaN(fd.getTime()) || isNaN(td.getTime())) return "时间格式无效";
+    if (fd >= td) return "开始时间必须早于结束时间";
+    if (fd > now || td > now) return "时间不能大于当前时间";
+    return "";
   }
   async function startTimeCompare() {
     if (!task.id || repairBusy) return;
+    // 前端验证
+    const errMsg = validateTimeRange(compareTimeFrom, compareTimeTo);
+    if (errMsg) {
+      timeCompareError = errMsg;
+      return;
+    }
+    const included = compareTables.filter(t => t.included && t.cutoffColumn);
+    if (included.length === 0) {
+      timeCompareError = "请至少选择一张参与对比的表并选择时间字段";
+      return;
+    }
     repairBusy = true;
     showTimeCompareModal = false;
     try {
-      const included = compareTables.filter(t => t.included && t.cutoffColumn);
-      if (included.length === 0) {
-        repairError = "请至少选择一张表并选择时间字段";
-        repairBusy = false;
-        return;
-      }
       const tableCutoffs = {};
       for (const item of included) {
         tableCutoffs[item.task_table_id] = item.cutoffColumn;
       }
-      const body = { table_cutoffs: tableCutoffs, cutoff_time: normalizeDatetimeLocal(compareCutoffTime) };
+      const from = new Date(compareTimeFrom);
+      const to = new Date(compareTimeTo);
+      // 设置结束时间为当天 23:59:59
+      to.setHours(23, 59, 59, 999);
+      const body = { table_cutoffs: tableCutoffs, cutoff_time: to.toISOString(), cutoff_from: from.toISOString() };
       await request(`/api/sync/tasks/${task.id}/repair/compare`, { method: "POST", token, body });
       await loadRepairJobs();
       onRefresh();
@@ -458,19 +474,7 @@
         </div>
       {/if}
     </div>
-    {#if canManage}
-      <div class="repair-toolbar">
-        <label>截止字段
-          {#if timeColumns.length > 0}
-            <select bind:value={cutoffColumn}>{#each timeColumns as column}<option value={column}>{column}</option>{/each}</select>
-          {:else}
-            <input bind:value={cutoffColumn} placeholder="例如 LastUpdateTime" />
-          {/if}
-        </label>
-        <label>截止时间<input type="datetime-local" step="1" bind:value={cutoffTime} /></label>
-      </div>
-      {#if cutoffColumnError}<div class="inline-error">{cutoffColumnError}</div>{/if}
-    {/if}
+
     {#if repairError}<div class="inline-error">{repairError}</div>{/if}
     <table class="data-table repair-table">
       <thead><tr><th>类型</th><th>状态</th><th>进度</th><th>差异</th><th>已补数</th><th>说明</th><th>开始时间</th>{#if canManage}<th>操作</th>{/if}</tr></thead>
@@ -512,12 +516,13 @@
 {#if showFullCompareConfirm}
   <div class="modal-layer">
     <button class="modal-backdrop" aria-label="关闭" on:click={() => { showFullCompareConfirm = false; }}></button>
-    <div class="modal confirm-modal">
-      <div class="modal-header">
+    <div class="modal confirm-modal confirm-compare-modal">
+      <div class="confirm-compare-body">
         <h3>确认全量对比</h3>
-        <p>将对所有同步表逐行比对源端和目标端数据，表数据量大时可能耗时较长。</p>
+        <p>将对所有同步表逐行比对源端和目标端数据。</p>
+        <p class="confirm-compare-warn">表数据量大时可能耗时较长，且会暂停正在运行的 CDC 同步任务。</p>
       </div>
-      <div class="modal-actions">
+      <div class="confirm-compare-footer">
         <button class="ghost" on:click={() => { showFullCompareConfirm = false; }}>取消</button>
         <button class="primary" on:click={startFullCompare}>确认发起</button>
       </div>
@@ -531,12 +536,14 @@
     <div class="modal time-compare-modal">
       <div class="modal-header">
         <h3>按时间段补数</h3>
-        <p>勾选要参与对比的表，为每表选择时间筛选字段，统一截止时间</p>
+        <p>选择时间范围，勾选参与对比的表并为每表选择时间字段</p>
         <button class="ghost icon" on:click={() => { showTimeCompareModal = false; }}><X size={17} /></button>
       </div>
-      <div class="repair-toolbar" style="padding:0.75rem 1.25rem;border-bottom:1px solid var(--border);">
-        <label>截止时间<input type="datetime-local" step="1" bind:value={compareCutoffTime} /></label>
+      <div class="time-range-inputs">
+        <label><span>开始时间</span><input type="datetime-local" step="1" bind:value={compareTimeFrom} /></label>
+        <label><span>结束时间</span><input type="datetime-local" step="1" bind:value={compareTimeTo} /></label>
       </div>
+      {#if timeCompareError}<div class="inline-error" style="margin:0 1.25rem 0.5rem">{timeCompareError}</div>{/if}
       <table class="data-table">
         <thead><tr><th style="width:2.5rem">参与</th><th>源表</th><th>目标表</th><th>时间字段</th></tr></thead>
         <tbody>
@@ -546,8 +553,12 @@
               <td>{item.source_table}</td>
               <td>{item.target_table}</td>
               <td>
-                {#if item.allColumns.length === 0}
-                  <button class="link-button" disabled={item.loadingColumns} on:click={() => loadCompareTableColumns(item)}>{item.loadingColumns ? "加载中..." : "加载字段"}</button>
+                {#if item.loadingColumns}
+                  <span class="cell-sub">加载中...</span>
+                {:else if !item.colsLoaded}
+                  <span class="cell-sub">未加载</span>
+                {:else if item.allColumns.length === 0}
+                  <span class="cell-sub">无时间字段</span>
                 {:else}
                   <select bind:value={item.cutoffColumn}>
                     {#each item.allColumns as col}<option value={col}>{col}</option>{/each}
@@ -568,7 +579,7 @@
       </div>
       <div class="modal-actions">
         <button class="ghost" on:click={() => { showTimeCompareModal = false; }}>取消</button>
-        <button class="primary" disabled={!compareTables.some(t => t.included && t.cutoffColumn) || !compareCutoffTime} on:click={startTimeCompare}>确认发起</button>
+        <button class="primary" disabled={!compareTables.some(t => t.included && t.cutoffColumn)} on:click={startTimeCompare}>确认发起</button>
       </div>
     </div>
   </div>
