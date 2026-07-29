@@ -51,6 +51,21 @@ func jsonBytes(value interface{}) ([]byte, bool) {
 	}
 }
 
+// UintStringMap 用于存储 map[uint]string 类型的 JSON 字段
+type UintStringMap map[uint]string
+
+func (m *UintStringMap) Scan(value interface{}) error {
+	bytes, ok := jsonBytes(value)
+	if !ok {
+		return nil
+	}
+	return json.Unmarshal(bytes, m)
+}
+
+func (m UintStringMap) Value() (driver.Value, error) {
+	return json.Marshal(m)
+}
+
 // SyncTask 同步任务
 type SyncTask struct {
 	ID                   uint               `gorm:"primarykey" json:"id"`
@@ -230,27 +245,27 @@ type ServerMonitorSetting struct {
 func (ServerMonitorSetting) TableName() string { return "server_monitor_settings" }
 
 type SyncRepairJob struct {
-	ID              uint            `gorm:"primarykey" json:"id"`
-	CreatedAt       time.Time       `json:"created_at"`
-	UpdatedAt       time.Time       `json:"updated_at"`
-	TaskID          uint            `gorm:"not null;index" json:"task_id"`
-	JobType         string          `gorm:"size:20;not null;index" json:"job_type"` // compare, repair
-	Status          string          `gorm:"size:20;not null;index" json:"status"`   // running, canceling, canceled, success, failed
-	SourceJobID     uint            `gorm:"index" json:"source_job_id"`
-	CutoffTime      *time.Time      `json:"cutoff_time"`
-	CutoffFrom      *time.Time      `json:"cutoff_from,omitempty"`
-	CutoffColumn    string          `gorm:"size:100" json:"cutoff_column"`
-	TableCutoffs    map[uint]string `gorm:"type:json" json:"table_cutoffs,omitempty"`
-	TotalRows       int64           `gorm:"not null;default:0" json:"total_rows"`
-	ProcessedRows   int64           `gorm:"not null;default:0" json:"processed_rows"`
-	DiffRows        int64           `gorm:"not null;default:0" json:"diff_rows"`
-	RepairedRows    int64           `gorm:"not null;default:0" json:"repaired_rows"`
-	ProgressPercent float64         `gorm:"not null;default:0" json:"progress_percent"`
-	Message         string          `gorm:"type:text" json:"message"`
-	ErrorDetail     string          `gorm:"type:text" json:"error_detail,omitempty"`
-	PreviousStatus  string          `gorm:"size:30" json:"previous_status"`
-	StartedAt       *time.Time      `json:"started_at"`
-	FinishedAt      *time.Time      `json:"finished_at"`
+	ID              uint          `gorm:"primarykey" json:"id"`
+	CreatedAt       time.Time     `json:"created_at"`
+	UpdatedAt       time.Time     `json:"updated_at"`
+	TaskID          uint          `gorm:"not null;index" json:"task_id"`
+	JobType         string        `gorm:"size:20;not null;index" json:"job_type"` // compare, repair
+	Status          string        `gorm:"size:20;not null;index" json:"status"`   // running, canceling, canceled, success, failed
+	SourceJobID     uint          `gorm:"index" json:"source_job_id"`
+	CutoffTime      *time.Time    `json:"cutoff_time"`
+	CutoffFrom      *time.Time    `json:"cutoff_from,omitempty"`
+	CutoffColumn    string        `gorm:"size:100" json:"cutoff_column"`
+	TableCutoffs    UintStringMap `gorm:"type:json" json:"table_cutoffs,omitempty"`
+	TotalRows       int64         `gorm:"not null;default:0" json:"total_rows"`
+	ProcessedRows   int64         `gorm:"not null;default:0" json:"processed_rows"`
+	DiffRows        int64         `gorm:"not null;default:0" json:"diff_rows"`
+	RepairedRows    int64         `gorm:"not null;default:0" json:"repaired_rows"`
+	ProgressPercent float64       `gorm:"not null;default:0" json:"progress_percent"`
+	Message         string        `gorm:"type:text" json:"message"`
+	ErrorDetail     string        `gorm:"type:text" json:"error_detail,omitempty"`
+	PreviousStatus  string        `gorm:"size:30" json:"previous_status"`
+	StartedAt       *time.Time    `json:"started_at"`
+	FinishedAt      *time.Time    `json:"finished_at"`
 }
 
 func (SyncRepairJob) TableName() string { return "sync_repair_jobs" }
