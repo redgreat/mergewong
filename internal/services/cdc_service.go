@@ -836,7 +836,7 @@ func xaKeySuffix(xidKey string) (string, bool) {
 // cdcMaxBatchRows 控制 CDC 单次批量写入的最大行数，避免超过 MySQL 参数占位符上限
 // MySQL 默认 max_prepared_stmt_count=16382，每个占位符对应一个 ?
 // 普通列数按 50 列估算，单批次上限约 300 行足够安全
-const cdcMaxBatchRows = 500
+const cdcMaxBatchRows = 2000
 
 func applyCDCTransaction(db *gorm.DB, operations []cdcOperation) error {
 	if len(operations) == 0 {
@@ -866,36 +866,36 @@ func applyCDCTransaction(db *gorm.DB, operations []cdcOperation) error {
 			deletes = append(deletes, op)
 		}
 	}
-	return db.Transaction(func(tx *gorm.DB) error {
-		for _, g := range groups {
-			rows := g.rows
-			for start := 0; start < len(rows); start += cdcMaxBatchRows {
-				end := start + cdcMaxBatchRows
-				if end > len(rows) {
-					end = len(rows)
-				}
-				if err := writeMySQLBatchTx(tx, g.mapping, g.columns, rows[start:end]); err != nil {
-					return err
-				}
+	// 每批次独立提交，避免单个大事务导致 undo 膨胀和锁竞争
+	for _, g := range groups {
+		rows := g.rows
+		for start := 0; start < len(rows); start += cdcMaxBatchRows {
+			end := start + cdcMaxBatchRows
+			if end > len(rows) {
+				end = len(rows)
 			}
-		}
-		for _, op := range deletes {
-			pkIndex := -1
-			for i, column := range op.columns {
-				if column == op.mapping.SourcePrimaryKey {
-					pkIndex = i
-					break
-				}
-			}
-			if pkIndex < 0 {
-				return fmt.Errorf("表 %s 缺少主键列", op.mapping.SourceTable)
-			}
-			if err := tx.Exec("DELETE FROM "+quoteMySQL(op.mapping.TargetTable)+" WHERE "+quoteMySQL(op.mapping.TargetPrimaryKey)+" = ?", normalizeMySQLScannedValue(op.values[pkIndex])).Error; err != nil {
+			if err := writeMySQLBatch(db, g.mapping, g.columns, rows[start:end]); err != nil {
 				return err
 			}
 		}
-		return nil
-	})
+	}
+	// delete 操作也独立提交
+	for _, op := range deletes {
+		pkIndex := -1
+		for i, column := range op.columns {
+			if column == op.mapping.SourcePrimaryKey {
+				pkIndex = i
+				break
+			}
+		}
+		if pkIndex < 0 {
+			return fmt.Errorf("表 %s 缺少主键列", op.mapping.SourceTable)
+		}
+		if err := db.Exec("DELETE FROM "+quoteMySQL(op.mapping.TargetTable)+" WHERE "+quoteMySQL(op.mapping.TargetPrimaryKey)+" = ?", normalizeMySQLScannedValue(op.values[pkIndex])).Error; err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (s *SyncService) recordCDCFailure(task *models.SyncTask, err error) {

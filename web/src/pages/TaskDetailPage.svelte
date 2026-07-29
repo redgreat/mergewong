@@ -418,10 +418,10 @@
   <div class="detail-heading"><div><button class="ghost icon-text" on:click={onBack}><ArrowLeft size={16}/>返回任务</button><h2>{task.name}</h2><p>{task.source_db} → {task.target_db}</p></div><button class="ghost icon-text" on:click={() => refreshDetail(true)}><RefreshCw size={15}/>刷新</button></div>
   <div class="metric-grid">
     <div class="metric-card"><span><Workflow size={16}/>运行状态</span><strong>{runtimeText(task.runtime_status)}</strong><small>{task.last_run_message || "-"}</small></div>
-    <div class="metric-card"><span><Gauge size={16}/>同步延迟</span><strong>{delayText(task.delay_seconds)}</strong><small>{(task.rows_per_second || 0).toFixed(1)} 行/秒</small></div>
-	<div class="metric-card"><span><Database size={16}/>全量初始化进度</span><strong>{overallPercent.toFixed(1)}%</strong><small>{snapshotProcessed} / {snapshotTotal} 行</small></div>
-    <div class="metric-card"><span>Binlog 位点</span><strong class="position-text">{task.cdc_checkpoint?.binlog_file || "-"}</strong><small>{task.cdc_checkpoint?.binlog_position || "-"}</small></div>
-  </div>
+    <div class="metric-card"><span><Gauge size={16}/>同步速率</span><strong>{(task.rows_per_second || 0).toFixed(1)}</strong><small>行/秒</small></div>
+		<div class="metric-card"><span><Database size={16}/>全量初始化进度</span><strong>{overallPercent.toFixed(1)}%</strong><small>{snapshotProcessed} / {snapshotTotal} 行</small></div>
+	    <div class="metric-card"><span>花费时间</span><strong>{task.phase_started_at ? durationText(task.phase_started_at, task.last_success_at || new Date()) : "-"}</strong><small>已持续</small></div>
+	  </div>
   {#if task.sync_type !== "full"}
   <section class="workspace-panel detail-section trend-section">
     <div class="card-header">
@@ -501,12 +501,12 @@
     {/if}
   </section>
   {/if}
-  <section class="workspace-panel detail-section"><div class="card-header"><div><h2>同步进度</h2><p>新增表会先独立初始化并追平主链路，再自动合并。</p></div></div>
+  <section class="workspace-panel detail-section"><div class="card-header"><div><h2>同步进度</h2></div></div>
     <table class="data-table"><thead><tr><th>源表</th><th>目标表</th><th>阶段</th><th>初始化进度</th><th>已初始化 / 总行数</th><th>说明</th></tr></thead><tbody>
       {#each task.task_tables || [] as table}<tr><td>{table.source_table}</td><td>{table.target_table}</td><td><span class={`pill ${table.sync_state === "failed" ? "danger" : table.sync_state === "active" ? "success" : "muted"}`}>{stateText(table.sync_state)}</span></td><td><div class="progress-cell"><div class="progress-track"><span style={`width:${Math.min(100, table.progress_percent || 0)}%`}></span></div><strong>{(table.progress_percent || 0).toFixed(1)}%</strong></div></td><td>{table.snapshot_processed || 0} / {table.snapshot_total || 0}</td><td>{table.progress_message || "-"}</td></tr>{/each}
     </tbody></table>
   </section>
-  <section class="workspace-panel detail-section"><div class="card-header"><div><h2>同步信息</h2></div></div><div class="detail-info-grid"><div><span>同步类型</span><strong>{task.sync_type === "full_cdc" ? "全量 + CDC" : task.sync_type === "cdc" ? "Binlog CDC" : "全量"}</strong></div><div><span>当前阶段开始</span><strong>{task.phase_started_at ? new Date(task.phase_started_at).toLocaleString() : "-"}</strong></div><div><span>最近成功</span><strong>{task.last_success_at ? new Date(task.last_success_at).toLocaleString() : "-"}</strong></div><div><span>花费时间</span><strong>{task.phase_started_at ? durationText(task.phase_started_at, task.last_success_at || new Date()) : "-"}</strong></div><div><span>预警发送群</span><strong>{task.alert_channel?.name || "未配置"}</strong></div></div></section>
+  <section class="workspace-panel detail-section"><div class="card-header"><div><h2>同步信息</h2></div></div><div class="detail-info-grid four-col"><div><span>当前阶段开始</span><strong>{task.phase_started_at ? new Date(task.phase_started_at).toLocaleString() : "-"}</strong></div><div><span>最近成功</span><strong>{task.last_success_at ? new Date(task.last_success_at).toLocaleString() : "-"}</strong></div><div><span>花费时间</span><strong>{task.phase_started_at ? durationText(task.phase_started_at, task.last_success_at || new Date()) : "-"}</strong></div><div><span>预警发送群</span><strong>{task.alert_channel?.name || "未配置"}</strong></div></div></section>
   {#if task.sync_type !== "full"}
   <section class="workspace-panel detail-section">
     <div class="card-header">
@@ -531,9 +531,9 @@
             <td>{(job.progress_percent || 0).toFixed(1)}%</td>
             <td>{#if Number(job.diff_rows || 0) > 0}<button class="link-button" on:click={() => openDiffs(job)}>{job.diff_rows}</button>{:else}0{/if}</td>
             <td>{job.repaired_rows || 0}</td>
-            <td>{job.error_detail || job.message || "-"}{#if job.cutoff_from || job.cutoff_time}<button class="link-button" on:click={() => showJobDetail = job}>详情</button>{:else if job.cutoff_column || job.cutoff_time}<span class="cell-sub">{#if job.cutoff_column}{job.cutoff_column}{/if}{#if job.cutoff_time} ≤ {new Date(job.cutoff_time).toLocaleString()}{/if}</span>{/if}</td>
+            <td>{job.error_detail || job.message || "-"}{#if job.cutoff_column || job.cutoff_time}<span class="cell-sub">{#if job.cutoff_column}{job.cutoff_column}{/if}{#if job.cutoff_time} ≤ {new Date(job.cutoff_time).toLocaleString()}{/if}</span>{/if}</td>
             <td>{job.started_at ? new Date(job.started_at).toLocaleString() : "-"}</td>
-            {#if canManage}<td>{#if canRepairJob(job)}<button class="ghost icon-text" disabled={repairBusy || !!runningJob} on:click={() => startRepair(job)}><RotateCw size={14}/>补这次</button>{:else if job.status === "running" || job.status === "canceling"}<button class="ghost icon-text" disabled={repairBusy} on:click={() => confirmCancel(job)}><X size={14}/>取消</button>{:else}-{/if}</td>{/if}
+            {#if canManage}<td class="actions-cell">{#if (job.cutoff_from || job.cutoff_time) || canRepairJob(job) || job.status === "running" || job.status === "canceling"}<div class="actions-dropdown" class:open={repairActionsOpenId === job.id}><button class="ghost icon-text" on:click|stopPropagation={() => repairActionsOpenId = repairActionsOpenId === job.id ? null : job.id}>…</button>{#if repairActionsOpenId === job.id}<div class="dropdown-menu">{#if job.cutoff_from || job.cutoff_time}<button on:click={() => { showJobDetail = job; repairActionsOpenId = null; }}>详情</button>{/if}{#if canRepairJob(job)}<button disabled={repairBusy || !!runningJob} on:click={() => { repairActionsOpenId = null; startRepair(job); }}>补这次</button>{/if}{#if job.status === "running" || job.status === "canceling"}<button disabled={repairBusy} on:click={() => { repairActionsOpenId = null; confirmCancel(job); }}>取消</button>{/if}</div>{/if}</div>{:else}-{/if}</td>{/if}
           </tr>
         {/each}
       </tbody>
