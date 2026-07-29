@@ -535,8 +535,8 @@
     <button class="modal-backdrop" aria-label="关闭" on:click={() => { showTimeCompareModal = false; }}></button>
     <div class="modal time-compare-modal">
       <div class="modal-header">
-        <h3>按时间段补数</h3>
-        <p>选择时间范围，勾选参与对比的表并为每表选择时间字段</p>
+        <div><h3>按时间段补数</h3>
+        <p>选择时间范围，勾选参与对比的表并为每表选择时间字段</p></div>
         <button class="ghost icon" on:click={() => { showTimeCompareModal = false; }}><X size={17} /></button>
       </div>
       <div class="time-range-inputs">
