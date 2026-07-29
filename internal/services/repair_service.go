@@ -127,27 +127,15 @@ func (s *RepairService) CancelJob(jobID uint) error {
 	if err := s.systemDB.First(&job, jobID).Error; err != nil {
 		return err
 	}
-	if job.Status != "running" {
+	if job.Status != "running" && job.Status != "canceling" {
 		return nil
 	}
+	// 无论后台 goroutine 是否存活，直接强制设为 canceled
+	_ = s.systemDB.Model(&job).Where("status IN ?", []string{"running", "canceling"}).Updates(map[string]interface{}{"status": "canceled", "message": "已取消", "finished_at": time.Now()}).Error
+	_ = NewSyncService().UpdateTask(job.TaskID, map[string]interface{}{"repair_status": "idle"})
+	// 如果后台 goroutine 还在，发送取消信号
 	if cancel, ok := repairCancels.Load(jobID); ok {
-		// 先标记为 canceling，立即发送取消信号
-		_ = s.systemDB.Model(&job).Update("status", "canceling").Error
 		cancel.(context.CancelFunc)()
-		// 等待 goroutine 退出，最长 30 秒
-		for i := 0; i < 30; i++ {
-			var current models.SyncRepairJob
-			if err := s.systemDB.First(&current, jobID).Error; err != nil {
-				break
-			}
-			if current.Status != "canceling" {
-				break
-			}
-			time.Sleep(time.Second)
-		}
-		// 强制设为 canceled，防止卡死
-		_ = s.systemDB.Model(&job).Where("status = ?", "canceling").Updates(map[string]interface{}{"status": "canceled", "message": "已取消", "finished_at": time.Now()}).Error
-		_ = NewSyncService().UpdateTask(job.TaskID, map[string]interface{}{"repair_status": "idle"})
 	}
 	return nil
 }
