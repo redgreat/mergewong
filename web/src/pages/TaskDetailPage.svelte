@@ -528,12 +528,12 @@
 {#if showCancelConfirm && pendingCancelJob}
   <div class="modal-layer">
     <button class="modal-backdrop" aria-label="关闭" on:click={() => { showCancelConfirm = false; pendingCancelJob = null; }}></button>
-    <div class="modal confirm-modal">
-      <div class="modal-header">
+    <div class="modal confirm-modal confirm-compare-modal">
+      <div class="confirm-compare-body">
         <h3>确认取消</h3>
         <p>当前 {pendingCancelJob.job_type === "compare" ? "对比" : "补数"} 任务正在执行，取消后发现的差异仍可查看。</p>
       </div>
-      <div class="modal-actions">
+      <div class="confirm-compare-footer">
         <button class="ghost" on:click={() => { showCancelConfirm = false; pendingCancelJob = null; }}>返回</button>
         <button class="primary" on:click={doCancel}>确认取消</button>
       </div>
