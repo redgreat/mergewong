@@ -26,13 +26,15 @@
   let columnErrors = {};
   let errors = {};
   $: if (!open) { step = 1; helpOpen = ""; errors = {}; expandedMappingTable = ""; columnCache = {}; columnLoading = {}; columnErrors = {}; }
-  $: if (open && precheckResult) step = 4;
+  $: if (open && precheckResult) step = 5;
   $: stepOneReady = !!(form.name?.trim() && form.source_db && form.target_db);
   $: stepTwoReady = !!form.table_mappings?.length && form.table_mappings.every((table) => table.source_table?.trim() && table.target_table?.trim());
+  $: stepThreeReady = form.sync_type === "full" || form.sync_type === "full_cdc" || form.sync_type === "cdc";
   $: filteredTables = availableTables.filter((table) => table.toLowerCase().includes(tableSearch.trim().toLowerCase()));
   $: effectiveBatchSize = Number(form.sync_batch_size || 0);
   $: effectiveTableWorkers = Number(form.snapshot_table_workers || 0);
   $: effectiveShardWorkers = Number(form.snapshot_shard_workers || 0);
+  $: isFullSync = form.sync_type === "full";
   $: if (open && step === 2 && form.source_db && loadedConnection !== form.source_db) loadSourceTables();
 
   async function loadSourceTables() {
@@ -228,9 +230,10 @@
       </div>
 
       <div class="wizard-steps" aria-label="任务配置步骤">
-        {#each [[1, "基础配置"], [2, "同步对象"], [3, "执行与预警"], [4, "预检查"]] as item}
-          <button type="button" disabled={(item[0] >= 2 && !stepOneReady) || (item[0] >= 3 && !stepTwoReady) || (item[0] === 4 && !precheckResult)} class:active={step === item[0]} class:done={step > item[0]} on:click={() => (step = item[0])}>
-            <span>{#if step > item[0]}<Check size={14} />{:else}{item[0]}{/if}</span>{item[1]}
+        {#each [[1, "基础配置"], [2, "同步对象"], [3, "运行方式"], [4, "定时与预警"], [5, "预检查"]] as item}
+          <button type="button" disabled={(item[0] >= 2 && !stepOneReady) || (item[0] >= 3 && !stepTwoReady) || (item[0] >= 4 && !stepThreeReady) || (item[0] === 5 && !precheckResult)} class:active={step === item[0]} class:done={step > item[0]} on:click={() => (step = item[0])}>
+            <span>{#if step > item[0]}<Check size={14} />{:else}{item[0]}{/if}</span>
+            <span>{item[1]}</span>
           </button>
         {/each}
       </div>
@@ -321,7 +324,7 @@
         {:else if step === 3}
           <div class="wizard-section-title">
             <h4>运行方式</h4>
-            <div class="help-wrap"><button class="help-button" type="button" aria-label="查看运行方式说明" on:click|stopPropagation={() => toggleHelp("schedule")}><CircleHelp size={16} /></button>{#if helpOpen === "schedule"}<div class="help-popover">全量+CDC 会先记录 Binlog 位点，再初始化存量数据，最后从该位点持续消费增删改事件；无需 Cron。</div>{/if}</div>
+            <div class="help-wrap"><button class="help-button" type="button" aria-label="查看运行方式说明" on:click|stopPropagation={() => toggleHelp("schedule")}><CircleHelp size={16} /></button>{#if helpOpen === "schedule"}<div class="help-popover">全量+CDC 会先记录 Binlog 位点，再初始化存量数据，最后从该位点持续消费增删改事件；无需 Cron。全量同步只执行一次初始化，完成后可配置定时重新执行。</div>{/if}</div>
           </div>
           <div class="mode-summary"><strong>{form.sync_type === "full_cdc" ? "全量初始化后持续同步" : form.sync_type === "cdc" ? "从当前位点开始持续同步" : "执行一次全量初始化"}</strong></div>
 
@@ -345,8 +348,33 @@
             </label>
             <label>分片并发
               <input type="number" min="0" max="32" bind:value={form.snapshot_shard_workers} placeholder="0 表示自动" />
-              <small>单表拆分后并行读取的分片数</small>
+              <small>单表分片并行数</small>
             </label>
+          </div>
+        {:else if step === 4}
+          <div class="wizard-section-title">
+            <h4>定时执行</h4>
+            <div class="help-wrap"><button class="help-button" type="button" aria-label="查看定时执行说明" on:click|stopPropagation={() => toggleHelp("cron")}><CircleHelp size={16} /></button>{#if helpOpen === "cron"}<div class="help-popover">配置定时执行后，任务会按设定周期自动启动。适用于全量同步的定期数据刷新。</div>{/if}</div>
+          </div>
+          <div class="form-grid wizard-grid compact-grid">
+            <label>调度方式
+              <select bind:value={form.schedule_type}>
+                <option value="manual">手动触发</option>
+                {#if isFullSync}
+                  <option value="interval">按间隔（分钟）</option>
+                  <option value="cron">Cron 表达式</option>
+                {/if}
+              </select>
+            </label>
+            {#if form.schedule_type === "interval"}
+              <label>间隔分钟
+                <input type="number" min="1" bind:value={form.interval_minutes} />
+              </label>
+            {:else if form.schedule_type === "cron"}
+              <label>Cron 表达式
+                <input type="text" bind:value={form.cron_expression} placeholder="例如 0 0 2 * * *（每天凌晨2点）" />
+              </label>
+            {/if}
           </div>
 
           <div class="wizard-section-title alert-title">
@@ -355,7 +383,7 @@
           </div>
           <div class="form-grid wizard-grid compact-grid">
             <label>预警发送方<select bind:value={form.alert_channel_id}><option value="">不发送预警</option>{#each alertChannels as channel}<option value={channel.id}>{channel.name}</option>{/each}</select></label>
-			<label>同步延迟阈值（ms）<input type="number" min="0" bind:value={form.alert_delay_ms} placeholder="默认5000" /></label>
+            <label>同步延迟阈值（ms）<input type="number" min="0" bind:value={form.alert_delay_ms} placeholder="默认5000" /></label>
           </div>
         {:else}
           <div class="precheck-summary" class:passed={precheckResult?.passed}>
@@ -372,8 +400,8 @@
       <div class="wizard-actions">
         <button class="ghost" type="button" on:click={onClose}>取消</button>
         <div>
-          {#if step > 1 && step < 4}<button class="ghost" type="button" on:click={() => (step -= 1)}>上一步</button>{/if}
-          {#if step < 3}<button type="button" disabled={(step === 1 && !stepOneReady) || (step === 2 && !stepTwoReady)} on:click={nextStep}>下一步</button>{:else if step === 3}<button disabled={saving} on:click={handleSave}>{saving ? "正在预检查…" : "保存并预检查"}</button>{:else}<button on:click={onClose}>完成</button>{/if}
+          {#if step > 1 && step < 5}<button class="ghost" type="button" on:click={() => (step -= 1)}>上一步</button>{/if}
+          {#if step < 4}<button type="button" disabled={(step === 1 && !stepOneReady) || (step === 2 && !stepTwoReady) || (step === 3 && !stepThreeReady)} on:click={nextStep}>下一步</button>{:else if step === 4}<button disabled={saving} on:click={handleSave}>{saving ? "正在预检查…" : "保存并预检查"}</button>{:else}<button on:click={onClose}>完成</button>{/if}
         </div>
       </div>
     </div>

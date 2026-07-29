@@ -33,8 +33,8 @@
   };
   const speedText = (speed) => {
     const value = Number(speed || 0);
-    if (value <= 0) return "0r/s";
-    return `${value >= 1000 ? (value / 1000).toFixed(1) + "k" : value.toFixed(1)}r/s`;
+    if (value <= 0) return "0 行/秒";
+    return `${value >= 1000 ? (value / 1000).toFixed(1) + "k" : value.toFixed(1)} 行/秒`;
   };
   const canDelete = (task) => !runningStates.includes(task.runtime_status);
   const canEditCheckpoint = (task) => task.sync_type !== "full" && ["paused", "stopped", "failed"].includes(task.runtime_status);
@@ -56,7 +56,7 @@
 <section class="workspace-panel task-workspace">
   <div class="card-header"><div></div><div class="header-actions"><span class="record-count">共 {taskTotal} 个任务</span><button class="ghost icon-text" on:click={onRefresh}><RefreshCw size={15} />刷新</button>{#if canManage}<button on:click={onOpenNew}>新增任务</button>{/if}</div></div>
   <table class="data-table task-monitor-table">
-    <thead><tr><th>名称</th><th>源连接</th><th>目标连接</th><th>类型</th><th>状态</th><th>同步延迟</th><th>同步速率</th><th>预警</th>{#if canManage}<th>操作</th>{/if}</tr></thead>
+    <thead><tr><th>名称</th><th>源连接</th><th>目标连接</th><th>类型</th><th>状态</th><th>延迟 / 进度</th><th>同步速率</th><th>预警</th>{#if canManage}<th>操作</th>{/if}</tr></thead>
     <tbody>
       {#each tasks as task}
         <tr>
@@ -64,7 +64,7 @@
           <td>{task.source_db}</td><td>{task.target_db}</td>
           <td>{task.sync_type === "full_cdc" ? "全量 + CDC" : task.sync_type === "cdc" ? "Binlog CDC" : "全量"}</td>
           <td><button class={`status-link ${statusClass(task)}`} class:clickable={task.runtime_status === "failed"} disabled={task.runtime_status !== "failed"} on:click={() => (detailTask = task)}>{#if task.runtime_status === "failed"}<CircleAlert size={14} />{/if}{statusText(task)}</button></td>
-          <td>{delayText(task.delay_seconds)}</td><td>{speedText(task.rows_per_second)}</td><td>{task.alert_channel?.name || "-"}</td>
+          <td>{#if task.sync_type === "full"}{((task.task_tables || []).reduce((s, t) => s + Number(t.snapshot_processed || 0), 0) / Math.max(1, (task.task_tables || []).reduce((s, t) => s + Number(t.snapshot_total || 0), 0)) * 100).toFixed(1)}%{:else}{delayText(task.delay_seconds)}{/if}</td><td>{speedText(task.rows_per_second)}</td><td>{task.alert_channel?.name || "-"}</td>
           {#if canManage}<td><div class="task-operation"><button class="icon-button" aria-label={`操作 ${task.name}`} on:click|stopPropagation={() => (menuTaskId = menuTaskId === task.id ? null : task.id)}><EllipsisVertical size={17} /></button>{#if menuTaskId === task.id}<div class="operation-menu">
             {#if runningStates.includes(task.runtime_status)}<button on:click={() => { menuTaskId = null; onPause(task); }}>暂停</button>{:else}<button disabled={task.validation_status !== "passed"} on:click={() => { menuTaskId = null; onResume(task); }}>开始</button>{/if}
             <button on:click={() => { menuTaskId = null; onEdit(task); }}>修改同步对象</button>

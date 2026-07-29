@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/redgreat/mergewong/internal/database"
 	"github.com/redgreat/mergewong/internal/models"
@@ -272,6 +273,13 @@ func (s *SyncService) syncSnapshotShard(task *models.SyncTask, mapping *models.S
 		if err := updateTaskTableProgress(s.systemDB, mapping.ID, map[string]interface{}{"sync_state": "initializing", "snapshot_processed": processed, "snapshot_total": sourceTotal, "progress_percent": percent, "progress_message": fmt.Sprintf("已初始化 %d / %d 行", processed, sourceTotal)}); err != nil {
 			return err
 		}
+		// 每批更新速率和延迟
+		elapsed := time.Since(task.CreatedAt).Seconds()
+		speed := float64(0)
+		if elapsed > 0 {
+			speed = float64(processed) / elapsed
+		}
+		_ = s.systemDB.Model(&models.SyncTask{}).Where("id = ?", task.ID).Updates(map[string]interface{}{"rows_per_second": speed, "rows_processed": processed}).Error
 	}
 }
 

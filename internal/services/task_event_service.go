@@ -108,7 +108,7 @@ func (s *SyncService) ResumeTask(taskID uint) error {
 	if err != nil {
 		return err
 	}
-	if task.RuntimeStatus != "paused" && task.RuntimeStatus != "stopped" && task.RuntimeStatus != "failed" {
+	if task.RuntimeStatus != "paused" && task.RuntimeStatus != "stopped" && task.RuntimeStatus != "failed" && task.RuntimeStatus != "completed" {
 		return fmt.Errorf("当前状态不能开始任务")
 	}
 	if task.ValidationStatus != "passed" {

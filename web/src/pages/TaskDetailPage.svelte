@@ -401,15 +401,9 @@
     finally { repairBusy = false; }
   }
 	onMount(() => {
-    loadRepairJobs();
-    loadMetrics();
-    let ticks = 0;
-    const timer = setInterval(() => {
-      ticks += 1;
-      refreshDetail(ticks % 5 === 0);
-    }, 2000);
-    return () => clearInterval(timer);
-  });
+	    loadRepairJobs();
+	    loadMetrics();
+	  });
 </script>
 
 <section class="task-detail-page">
@@ -504,6 +498,7 @@
     </tbody></table>
   </section>
   <section class="workspace-panel detail-section"><div class="card-header"><div><h2>同步信息</h2></div></div><div class="detail-info-grid"><div><span>同步类型</span><strong>{task.sync_type === "full_cdc" ? "全量 + CDC" : task.sync_type === "cdc" ? "Binlog CDC" : "全量"}</strong></div><div><span>最近成功</span><strong>{task.last_success_at ? new Date(task.last_success_at).toLocaleString() : "-"}</strong></div><div><span>预警发送群</span><strong>{task.alert_channel?.name || "未配置"}</strong></div><div><span>当前阶段开始</span><strong>{task.phase_started_at ? new Date(task.phase_started_at).toLocaleString() : "-"}</strong></div></div></section>
+  {#if task.sync_type !== "full"}
   <section class="workspace-panel detail-section">
     <div class="card-header">
       <div><h2>数据修复</h2><p>按当前字段映射和忽略字段执行源端到目标端的一致性对比与补数。</p></div>
@@ -527,14 +522,15 @@
             <td>{(job.progress_percent || 0).toFixed(1)}%</td>
             <td>{#if Number(job.diff_rows || 0) > 0}<button class="link-button" on:click={() => openDiffs(job)}>{job.diff_rows}</button>{:else}0{/if}</td>
             <td>{job.repaired_rows || 0}</td>
-            <td><div class="repair-desc"><span class="repair-desc-msg">{job.error_detail || job.message || "-"}</span>{#if job.cutoff_column || job.cutoff_time}<span class="cell-sub">{#if job.cutoff_column}{job.cutoff_column}{/if}{#if job.cutoff_time} ≤ {new Date(job.cutoff_time).toLocaleString()}{/if}</span>{/if}</div></td>
+            <td>{job.error_detail || job.message || "-"}{#if job.cutoff_from || job.cutoff_time}<button class="link-button" on:click={() => showJobDetail = job}>详情</button>{:else if job.cutoff_column || job.cutoff_time}<span class="cell-sub">{#if job.cutoff_column}{job.cutoff_column}{/if}{#if job.cutoff_time} ≤ {new Date(job.cutoff_time).toLocaleString()}{/if}</span>{/if}</td>
             <td>{job.started_at ? new Date(job.started_at).toLocaleString() : "-"}</td>
-            {#if canManage}<td class="actions-cell">{#if (job.cutoff_from || job.cutoff_time) || canRepairJob(job) || job.status === "running" || job.status === "canceling"}<div class="actions-dropdown" class:open={repairActionsOpenId === job.id}><button class="ghost icon-text" on:click|stopPropagation={() => repairActionsOpenId = repairActionsOpenId === job.id ? null : job.id}>…</button>{#if repairActionsOpenId === job.id}<div class="dropdown-menu">{#if job.cutoff_from || job.cutoff_time}<button on:click={() => { showJobDetail = job; repairActionsOpenId = null; }}>详情</button>{/if}{#if canRepairJob(job)}<button disabled={repairBusy || !!runningJob} on:click={() => { repairActionsOpenId = null; startRepair(job); }}>补这次</button>{/if}{#if job.status === "running" || job.status === "canceling"}<button disabled={repairBusy} on:click={() => { repairActionsOpenId = null; confirmCancel(job); }}>取消</button>{/if}</div>{/if}</div>{:else}-{/if}</td>{/if}
+            {#if canManage}<td>{#if canRepairJob(job)}<button class="ghost icon-text" disabled={repairBusy || !!runningJob} on:click={() => startRepair(job)}><RotateCw size={14}/>补这次</button>{:else if job.status === "running" || job.status === "canceling"}<button class="ghost icon-text" disabled={repairBusy} on:click={() => confirmCancel(job)}><X size={14}/>取消</button>{:else}-{/if}</td>{/if}
           </tr>
         {/each}
       </tbody>
     </table>
   </section>
+  {/if}
 </section>
 
 {#if repairActionsOpenId != null}

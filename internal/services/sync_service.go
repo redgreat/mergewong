@@ -228,8 +228,10 @@ func validateTaskAlertSettings(task *models.SyncTask) error {
 	if task.SyncType != "full" && task.SyncType != "cdc" && task.SyncType != "full_cdc" {
 		return fmt.Errorf("不支持的同步类型")
 	}
-	if task.ScheduleType != "manual" {
-		return fmt.Errorf("全量初始化和 Binlog CDC 不需要 Cron 或轮询调度")
+	if task.SyncType == "cdc" || task.SyncType == "full_cdc" {
+		if task.ScheduleType != "manual" {
+			return fmt.Errorf("CDC 任务不需要 Cron 或轮询调度")
+		}
 	}
 	if task.AlertDelaySeconds < 0 {
 		return fmt.Errorf("预警时间不能小于 0")
@@ -318,7 +320,7 @@ func (s *SyncService) ListTasks(page, pageSize int) ([]models.SyncTask, int64, e
 	s.systemDB.Model(&models.SyncTask{}).Count(&total)
 
 	offset := (page - 1) * pageSize
-	if err := s.systemDB.Preload("AlertChannel").Preload("CDCCheckpoint").Preload("TaskTables", func(db *gorm.DB) *gorm.DB { return db.Order("position ASC") }).Offset(offset).Limit(pageSize).Find(&tasks).Error; err != nil {
+	if err := s.systemDB.Order("id DESC").Preload("AlertChannel").Preload("CDCCheckpoint").Preload("TaskTables", func(db *gorm.DB) *gorm.DB { return db.Order("position ASC") }).Offset(offset).Limit(pageSize).Find(&tasks).Error; err != nil {
 		return nil, 0, err
 	}
 
@@ -349,6 +351,12 @@ func (s *SyncService) ExecuteTask(taskID uint) error {
 	}
 	if err := s.ValidateTaskConnections(task.SourceDB, task.TargetDB); err != nil {
 		return err
+	}
+
+	// 全量任务重复执行前重置检查点
+	if task.SyncType == "full" {
+		_ = s.systemDB.Where("task_table_id IN (?)", s.systemDB.Model(&models.SyncTaskTable{}).Select("id").Where("task_id = ?", task.ID)).Delete(&models.SyncCheckpoint{}).Error
+		_ = s.systemDB.Where("task_table_id IN (?)", s.systemDB.Model(&models.SyncTaskTable{}).Select("id").Where("task_id = ?", task.ID)).Delete(&models.SyncSnapshotShardCheckpoint{}).Error
 	}
 
 	// 更新任务状态为运行中
