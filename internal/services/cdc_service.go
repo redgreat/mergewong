@@ -537,7 +537,7 @@ func (m *CDCManager) stream(ctx context.Context, task *models.SyncTask, source *
 
 func (m *CDCManager) advanceCheckpoint(task *models.SyncTask, checkpoint *models.SyncCDCCheckpoint, file string, pos uint32, sessionRows int64, started time.Time, eventTimestamp uint32, lastMetricsUpdate, lastMetricsLog *time.Time, lastMetricsRows *int64, lastMetricsOps *cdcOperationMetrics, opMetrics cdcOperationMetrics) error {
 	now := time.Now()
-	if !lastMetricsUpdate.IsZero() && now.Sub(*lastMetricsUpdate) < time.Second {
+	if !lastMetricsUpdate.IsZero() && now.Sub(*lastMetricsUpdate) < 3*time.Second {
 		return nil
 	}
 	*lastMetricsUpdate = now
@@ -565,6 +565,7 @@ func (m *CDCManager) advanceCheckpoint(task *models.SyncTask, checkpoint *models
 	// #region debug-point E:checkpoint_advanced
 	xaDebugReport("E", "cdc_service.go:advanceCheckpoint", "推进 checkpoint/指标", map[string]interface{}{"task_id": task.ID, "file": file, "pos": pos, "delay_seconds": delay, "runtime_status": runtimeStatus, "session_rows": sessionRows, "op_metrics": opMetrics})
 	// #endregion
+	log.Printf("[CDC] 任务 %d 位点 %s:%d 延迟 %ds 吞吐 %.0f rows/s 累计 %d 行 ops={i:%d u:%d d:%d}", task.ID, file, pos, delay, speed, sessionRows, opMetrics.Insert, opMetrics.Update, opMetrics.Delete)
 	return m.service.RecordCDCMetricSnapshot(task, now, delay, speed, sessionRows, lastMetricsLog, lastMetricsRows, lastMetricsOps, opMetrics)
 }
 
@@ -811,18 +812,37 @@ func applyCDCTransaction(db *gorm.DB, operations []cdcOperation) error {
 	if len(operations) == 0 {
 		return nil
 	}
-	return db.Transaction(func(tx *gorm.DB) error {
-		for _, op := range operations {
-			if op.kind == "upsert" {
-				row := map[string]interface{}{}
-				for i, column := range op.columns {
-					row[column] = normalizeMySQLScannedValue(op.values[i])
-				}
-				if err := writeMySQLBatchTx(tx, op.mapping, op.columns, []map[string]interface{}{row}); err != nil {
-					return err
-				}
-				continue
+	// 1. 按 (mapping) 分组：upsert 行合并为批量，delete 逐条处理
+	type upsertGroup struct {
+		mapping *models.SyncTaskTable
+		columns []string
+		rows    []map[string]interface{}
+	}
+	groups := make(map[*models.SyncTaskTable]*upsertGroup)
+	var deletes []cdcOperation
+	for _, op := range operations {
+		if op.kind == "upsert" {
+			g := groups[op.mapping]
+			if g == nil {
+				g = &upsertGroup{mapping: op.mapping, columns: op.columns}
+				groups[op.mapping] = g
 			}
+			row := make(map[string]interface{}, len(op.columns))
+			for i, column := range op.columns {
+				row[column] = normalizeMySQLScannedValue(op.values[i])
+			}
+			g.rows = append(g.rows, row)
+		} else {
+			deletes = append(deletes, op)
+		}
+	}
+	return db.Transaction(func(tx *gorm.DB) error {
+		for _, g := range groups {
+			if err := writeMySQLBatchTx(tx, g.mapping, g.columns, g.rows); err != nil {
+				return err
+			}
+		}
+		for _, op := range deletes {
 			pkIndex := -1
 			for i, column := range op.columns {
 				if column == op.mapping.SourcePrimaryKey {
