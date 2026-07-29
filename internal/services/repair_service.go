@@ -127,9 +127,24 @@ func (s *RepairService) CancelJob(jobID uint) error {
 	if job.Status != "running" {
 		return nil
 	}
-	_ = s.systemDB.Model(&job).Update("status", "canceling").Error
 	if cancel, ok := repairCancels.Load(jobID); ok {
+		// 先标记为 canceling，立即发送取消信号
+		_ = s.systemDB.Model(&job).Update("status", "canceling").Error
 		cancel.(context.CancelFunc)()
+		// 等待 goroutine 退出，最长 30 秒
+		for i := 0; i < 30; i++ {
+			var current models.SyncRepairJob
+			if err := s.systemDB.First(&current, jobID).Error; err != nil {
+				break
+			}
+			if current.Status != "canceling" {
+				break
+			}
+			time.Sleep(time.Second)
+		}
+		// 强制设为 canceled，防止卡死
+		_ = s.systemDB.Model(&job).Where("status = ?", "canceling").Updates(map[string]interface{}{"status": "canceled", "message": "已取消", "finished_at": time.Now()}).Error
+		_ = NewSyncService().UpdateTask(job.TaskID, map[string]interface{}{"repair_status": "idle"})
 	}
 	return nil
 }
@@ -152,6 +167,7 @@ func (s *RepairService) runCompare(ctx context.Context, jobID uint) {
 		return
 	}
 	err := s.compareJob(ctx, &job)
+	// 不管 ctx 是否取消，都推进 finishJob（finishJob 内部会判断 ctx.Err() 写 canceled）
 	s.finishJob(ctx, &job, err, "对比完成")
 }
 
@@ -396,7 +412,8 @@ func (s *RepairService) finishJob(ctx context.Context, job *models.SyncRepairJob
 		updates["message"] = successMessage
 		updates["progress_percent"] = 100
 	}
-	_ = s.systemDB.Model(job).Updates(updates).Error
+	// 只更新状态不是 canceling 的记录，避免 CancelJob 强制更新后被覆盖
+	_ = s.systemDB.Model(job).Where("status != ?", "canceling").Updates(updates).Error
 	_ = NewSyncService().UpdateTask(job.TaskID, map[string]interface{}{"repair_status": "idle"})
 }
 

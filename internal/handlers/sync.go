@@ -360,7 +360,7 @@ func (h *SyncHandler) GetTaskLogs(c *gin.Context) {
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
 	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "10"))
 
-	logs, total, err := h.syncService.GetTaskLogs(uint(id), page, pageSize)
+	logs, total, err := h.syncService.GetTaskLogs(uint(id), page, pageSize, nil, nil)
 	if err != nil {
 		utils.InternalServerError(c, "获取日志失败: "+err.Error())
 		return
@@ -398,7 +398,18 @@ func (h *SyncHandler) ListLogs(c *gin.Context) {
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
 	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "10"))
 	taskID, _ := strconv.ParseUint(c.DefaultQuery("task_id", "0"), 10, 32)
-	logs, total, err := h.syncService.GetTaskLogs(uint(taskID), page, pageSize)
+	var fromTime, toTime *time.Time
+	if fromStr := c.Query("from"); fromStr != "" {
+		if t, err := time.Parse(time.RFC3339, fromStr); err == nil {
+			fromTime = &t
+		}
+	}
+	if toStr := c.Query("to"); toStr != "" {
+		if t, err := time.Parse(time.RFC3339, toStr); err == nil {
+			toTime = &t
+		}
+	}
+	logs, total, err := h.syncService.GetTaskLogs(uint(taskID), page, pageSize, fromTime, toTime)
 	if err != nil {
 		utils.InternalServerError(c, "获取日志失败: "+err.Error())
 		return

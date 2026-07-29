@@ -141,6 +141,23 @@ func (m *CDCManager) StartTask(taskID uint) error {
 		return fmt.Errorf("该任务不是 Binlog CDC 任务")
 	}
 	m.StopTask(taskID)
+	// 启动前检查 binlog 位点是否仍然有效，无效则自动重置
+	checkpoint := task.CDCCheckpoint
+	if checkpoint != nil && checkpoint.BinlogFile != "" && checkpoint.SnapshotCompleted {
+		if err := m.ensureBinlogPositionValid(task, checkpoint); err != nil {
+			// 如果位点无效，自动重置到当前位点继续
+			log.Printf("CDC 任务 %d 检查点位点 %s:%d 无效，自动重置到当前位点", taskID, checkpoint.BinlogFile, checkpoint.BinlogPosition)
+			file, pos, posErr := currentMySQLPosition(task.SourceDB)
+			if posErr == nil {
+				checkpoint.BinlogFile = file
+				checkpoint.BinlogPosition = pos
+				_ = m.service.systemDB.Model(checkpoint).Updates(map[string]interface{}{"binlog_file": file, "binlog_position": pos, "last_event_at": nil}).Error
+				m.service.RecordTaskEvent(task, "checkpoint_reset", "cdc", "running",
+					"Binlog 位点被清理，已自动从当前位点恢复",
+					fmt.Sprintf("原 %s:%d → 新 %s:%d", checkpoint.BinlogFile, checkpoint.BinlogPosition, file, pos), 0, 0)
+			}
+		}
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	m.mu.Lock()
 	m.nextID++
@@ -185,6 +202,17 @@ func (m *CDCManager) StopTask(taskID uint) {
 		delete(m.workers, taskID)
 	}
 	m.mu.Unlock()
+}
+
+func (m *CDCManager) ensureBinlogPositionValid(task *models.SyncTask, checkpoint *models.SyncCDCCheckpoint) error {
+	sourceDB, err := database.GetManager().GetConnection(task.SourceDB)
+	if err != nil {
+		return err
+	}
+	// 用 SHOW BINLOG EVENTS 探测位点是否可读，这是最直接的方式
+	// 如果 binlog 文件已被清理，MySQL 会返回错误
+	var dummy struct{}
+	return sourceDB.Raw("SHOW BINLOG EVENTS IN '" + checkpoint.BinlogFile + "' FROM " + fmt.Sprint(checkpoint.BinlogPosition) + " LIMIT 1").Scan(&dummy).Error
 }
 
 func (m *CDCManager) autoRecoverFromBinlogPurge(taskID uint) {
@@ -441,6 +469,10 @@ func (m *CDCManager) stream(ctx context.Context, task *models.SyncTask, source *
 					operations = append(operations, cdcOperation{kind: "delete", mapping: mapping, columns: columns, values: row})
 					opMetrics.Delete++
 				}
+			}
+			// 大事务进行中时每 5000 行输出一次进度
+			if len(operations)%5000 == 0 {
+				log.Printf("[CDC] 任务 %d 大事务进行中: 已缓存 %d 行 (i:%d u:%d d:%d) 位点 %s:%d", task.ID, len(operations), opMetrics.Insert, opMetrics.Update, opMetrics.Delete, currentFile, event.Header.LogPos)
 			}
 		case *replication.XIDEvent:
 			// #region debug-point A:xid_event_before_apply

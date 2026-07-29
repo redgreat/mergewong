@@ -522,13 +522,19 @@ func (s *SyncService) syncData(task *models.SyncTask) (int64, error) {
 }
 
 // GetTaskLogs 获取任务日志
-func (s *SyncService) GetTaskLogs(taskID uint, page, pageSize int) ([]models.SyncLog, int64, error) {
+func (s *SyncService) GetTaskLogs(taskID uint, page, pageSize int, fromTime, toTime *time.Time) ([]models.SyncLog, int64, error) {
 	var logs []models.SyncLog
 	var total int64
 
 	query := s.systemDB.Model(&models.SyncLog{})
 	if taskID > 0 {
 		query = query.Where("task_id = ?", taskID)
+	}
+	if fromTime != nil {
+		query = query.Where("created_at >= ?", *fromTime)
+	}
+	if toTime != nil {
+		query = query.Where("created_at <= ?", *toTime)
 	}
 	query.Count(&total)
 

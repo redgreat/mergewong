@@ -1,5 +1,5 @@
 <script>
-  import { RefreshCw, ScrollText } from "lucide-svelte";
+  import { RefreshCw, ScrollText, Search } from "lucide-svelte";
   let taskQuery = "";
   let resultsOpen = false;
   $: filteredTasks = tasks.filter((task) => task.name.toLowerCase().includes(taskQuery.trim().toLowerCase())).slice(0, 8);
@@ -14,6 +14,11 @@
   function handleWindowClick(event) {
     if (!event.target.closest(".task-search")) resultsOpen = false;
   }
+
+  function handleFilter() {
+    if (onFilter) onFilter();
+  }
+
 	const eventLabel = (value) => ({ task_created: "新增任务", task_updated: "修改任务", task_deleted: "删除任务", precheck: "预检查", snapshot_started: "全量开始", snapshot_completed: "全量完成", cdc_started: "增量开始", cdc_failed: "增量报错", task_paused: "暂停任务", task_resumed: "开始任务", checkpoint_changed: "修改位点", alert_sent: "发送预警" }[value] || value || "运行事件");
 	const statusLabel = (value) => ({ success: "成功", failed: "失败", running: "进行中", warning: "预警" }[value] || value);
   export let tasks = [];
@@ -22,10 +27,13 @@
   export let logPage = 1;
   export let logPageSize = 10;
   export let logTotal = 0;
+  export let logDateFrom = "";
+  export let logDateTo = "";
   export let onChangeTask = () => {};
   export let onPrev = () => {};
   export let onNext = () => {};
   export let onRefresh = () => {};
+  export let onFilter = null;
 </script>
 
 <svelte:window on:click={handleWindowClick} />
@@ -46,6 +54,11 @@
         </div>
       {/if}
     </div>
+    <div class="date-filter">
+      <label>开始<input type="datetime-local" bind:value={logDateFrom} /></label>
+      <label>结束<input type="datetime-local" bind:value={logDateTo} /></label>
+      <button class="ghost icon-text" on:click={handleFilter}><Search size={14} />筛选</button>
+    </div>
     <div class="toolbar-right">
       <span class="record-count">共 {logTotal} 条记录</span>
     </div>
@@ -54,32 +67,32 @@
     <thead>
       <tr>
         <th>时间</th>
-		<th>同步任务</th>
-		<th>事件</th>
+			<th>同步任务</th>
+			<th>事件</th>
         <th>状态</th>
-		<th>阶段与详情</th>
-		<th>数据量</th>
-		<th>耗时</th>
+			<th>阶段与详情</th>
+			<th>数据量</th>
+			<th>耗时</th>
       </tr>
     </thead>
     <tbody>
       {#each logs as log}
         <tr>
           <td>{new Date(log.created_at).toLocaleString()}</td>
-		  <td>{log.task_name || tasks.find((task) => task.id === log.task_id)?.name || `任务 #${log.task_id}`}</td>
-		  <td>{eventLabel(log.event_type)}</td>
+			  <td>{log.task_name || tasks.find((task) => task.id === log.task_id)?.name || `任务 #${log.task_id}`}</td>
+			  <td>{eventLabel(log.event_type)}</td>
           <td>
             <span class={`pill ${log.status === "success" ? "success" : log.status === "failed" ? "danger" : "muted"}`}>
-			  {statusLabel(log.status)}
+				  {statusLabel(log.status)}
             </span>
           </td>
-		  <td><strong>{log.message || "-"}</strong>{#if log.detail || log.error_detail}<span class="cell-sub log-detail">{log.detail || log.error_detail}</span>{/if}</td>
-		  <td>{log.rows_affected ? `${log.rows_affected} 行` : "-"}</td>
-		  <td>{log.duration ? `${(log.duration / 1000).toFixed(2)} 秒` : "-"}</td>
+			  <td><strong>{log.message || "-"}</strong>{#if log.detail || log.error_detail}<span class="cell-sub log-detail">{log.detail || log.error_detail}</span>{/if}</td>
+			  <td>{log.rows_affected ? `${log.rows_affected} 行` : "-"}</td>
+			  <td>{log.duration ? `${(log.duration / 1000).toFixed(2)} 秒` : "-"}</td>
         </tr>
       {/each}
       {#if logs.length === 0}
-		<tr class="empty-row"><td colspan="7"><div class="empty-state"><span class="empty-icon"><ScrollText size={24} /></span><strong>暂无同步日志</strong></div></td></tr>
+			<tr class="empty-row"><td colspan="7"><div class="empty-state"><span class="empty-icon"><ScrollText size={24} /></span><strong>暂无同步日志</strong></div></td></tr>
       {/if}
     </tbody>
   </table>
@@ -89,3 +102,27 @@
     <button class="ghost" disabled={logPage >= Math.ceil(logTotal / logPageSize)} on:click={onNext}>下一页</button>
   </div>
 </section>
+
+<style>
+  .date-filter {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+  .date-filter label {
+    font-size: 0.8125rem;
+    color: var(--text-secondary);
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+  }
+  .date-filter input {
+    padding: 0.3rem 0.5rem;
+    border: 1px solid var(--border);
+    border-radius: 0.5rem;
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    font-size: 0.8125rem;
+    max-width: 11rem;
+  }
+</style>

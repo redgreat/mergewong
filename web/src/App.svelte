@@ -100,6 +100,8 @@
   let logPage = 1;
   let logPageSize = 10;
   let logTotal = 0;
+  let logDateFrom = "";
+  let logDateTo = "";
 
   let users = [];
   let userPage = 1;
@@ -578,16 +580,16 @@
 	catch (error) { setMessage(error.message, "error"); throw error; }
   }
 
-  async function loadLogs() {
+  async function loadLogs(fromDate, toDate) {
     try {
-	  const data = await request(`/api/sync/logs`, {
-        token,
-        params: {
-		  task_id: logTaskId || 0,
-          page: logPage,
-          page_size: logPageSize
-        }
-      });
+      const params = {
+        task_id: logTaskId || 0,
+        page: logPage,
+        page_size: logPageSize
+      };
+      if (fromDate) params.from = fromDate;
+      if (toDate) params.to = toDate;
+      const data = await request(`/api/sync/logs`, { token, params });
       logs = data.data;
       logTotal = data.total;
     } catch (error) {
@@ -724,10 +726,13 @@
         {logPage}
         {logPageSize}
         {logTotal}
+        bind:logDateFrom
+        bind:logDateTo
         onChangeTask={loadLogs}
-        onPrev={() => { logPage -= 1; loadLogs(); }}
-        onNext={() => { logPage += 1; loadLogs(); }}
-        onRefresh={loadLogs}
+        onPrev={() => { logPage -= 1; loadLogs(logDateFrom, logDateTo); }}
+        onNext={() => { logPage += 1; loadLogs(logDateFrom, logDateTo); }}
+        onRefresh={() => loadLogs(logDateFrom, logDateTo)}
+        onFilter={() => { logPage = 1; loadLogs(logDateFrom, logDateTo); }}
       />
     {:else if view === "alerts"}
       <AlertsPage
