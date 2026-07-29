@@ -228,7 +228,7 @@ func (s *SyncService) catchupTables(task *models.SyncTask, tables []models.SyncT
 				}
 			}
 		case *replication.XIDEvent:
-			if err := applyCDCTransaction(targetDB, operations); err != nil {
+			if err := applyCDCTransaction(targetDB, operations, nil, nil, time.Time{}); err != nil {
 				return current, err
 			}
 			operations = operations[:0]
@@ -238,7 +238,7 @@ func (s *SyncService) catchupTables(task *models.SyncTask, tables []models.SyncT
 			}
 		case *replication.QueryEvent:
 			if strings.EqualFold(strings.TrimSpace(string(e.Query)), "COMMIT") {
-				if err := applyCDCTransaction(targetDB, operations); err != nil {
+				if err := applyCDCTransaction(targetDB, operations, nil, nil, time.Time{}); err != nil {
 					return current, err
 				}
 				operations = operations[:0]

@@ -411,7 +411,7 @@ func (m *CDCManager) stream(ctx context.Context, task *models.SyncTask, source *
 			// #endregion
 			applied := int64(len(operations))
 			if onePhase {
-				if err := applyCDCTransaction(targetDB, operations); err != nil {
+				if err := applyCDCTransaction(targetDB, operations, task, m.service.systemDB, streamStarted); err != nil {
 					return err
 				}
 			} else if err := m.saveXAPrepared(task.ID, xidKey, currentFile, event.Header.LogPos, operations); err != nil {
@@ -472,7 +472,7 @@ func (m *CDCManager) stream(ctx context.Context, task *models.SyncTask, source *
 			xaDebugReport("A", "cdc_service.go:XIDEvent", "XIDEvent 提交点触发 apply", map[string]interface{}{"task_id": task.ID, "ops_len": len(operations), "file": currentFile, "pos": event.Header.LogPos, "event_ts": event.Header.Timestamp})
 			// #endregion
 			applied := int64(len(operations))
-			if err := applyCDCTransaction(targetDB, operations); err != nil {
+			if err := applyCDCTransaction(targetDB, operations, task, m.service.systemDB, streamStarted); err != nil {
 				// #region debug-point D:apply_error
 				xaDebugReport("D", "cdc_service.go:XIDEvent", "applyCDCTransaction 返回错误", map[string]interface{}{"task_id": task.ID, "ops_len": len(operations), "err": err.Error()})
 				// #endregion
@@ -506,7 +506,7 @@ func (m *CDCManager) stream(ctx context.Context, task *models.SyncTask, source *
 						// #endregion
 						if len(operations) > 0 {
 							applied = int64(len(operations))
-							if err := applyCDCTransaction(targetDB, operations); err != nil {
+							if err := applyCDCTransaction(targetDB, operations, task, m.service.systemDB, streamStarted); err != nil {
 								// #region debug-point D:apply_error_xa_commit_fallback
 								xaDebugReport("D", "cdc_service.go:XA_COMMIT", "XA COMMIT fallback applyCDCTransaction 返回错误", map[string]interface{}{"task_id": task.ID, "ops_len": len(operations), "err": err.Error()})
 								// #endregion
@@ -523,7 +523,7 @@ func (m *CDCManager) stream(ctx context.Context, task *models.SyncTask, source *
 						xaDebugReport("A", "cdc_service.go:XA_COMMIT", "加载 XA prepared 成功并准备 apply", map[string]interface{}{"task_id": task.ID, "xid_key": xidKey, "prepared_ops_len": len(prepared), "file": currentFile, "pos": event.Header.LogPos})
 						// #endregion
 						applied = int64(len(prepared))
-						if err := applyCDCTransaction(targetDB, prepared); err != nil {
+						if err := applyCDCTransaction(targetDB, prepared, task, m.service.systemDB, streamStarted); err != nil {
 							// #region debug-point D:apply_error_xa_commit
 							xaDebugReport("D", "cdc_service.go:XA_COMMIT", "XA COMMIT applyCDCTransaction 返回错误", map[string]interface{}{"task_id": task.ID, "prepared_ops_len": len(prepared), "err": err.Error()})
 							// #endregion
@@ -547,7 +547,7 @@ func (m *CDCManager) stream(ctx context.Context, task *models.SyncTask, source *
 			}
 			if query == "COMMIT" {
 				applied := int64(len(operations))
-				if err := applyCDCTransaction(targetDB, operations); err != nil {
+				if err := applyCDCTransaction(targetDB, operations, task, m.service.systemDB, streamStarted); err != nil {
 					return err
 				}
 				operations = operations[:0]
@@ -838,7 +838,24 @@ func xaKeySuffix(xidKey string) (string, bool) {
 // 普通列数按 50 列估算，单批次上限约 300 行足够安全
 const cdcMaxBatchRows = 2000
 
-func applyCDCTransaction(db *gorm.DB, operations []cdcOperation) error {
+// applyCDCProgress 在 CDC 大事务写入期间更新任务速率和延迟，不推进检查点
+func applyCDCProgress(systemDB *gorm.DB, taskID uint, batchRows int, batchDuration time.Duration, streamStarted time.Time, totalProcessed int) {
+	now := time.Now()
+	if batchDuration > 0 {
+		_ = float64(batchRows) / batchDuration.Seconds()
+	}
+	elapsed := now.Sub(streamStarted).Seconds()
+	avgSpeed := float64(0)
+	if elapsed > 0 {
+		avgSpeed = float64(totalProcessed) / elapsed
+	}
+	_ = systemDB.Model(&models.SyncTask{}).Where("id = ?", taskID).Updates(map[string]interface{}{
+		"rows_per_second": avgSpeed,
+		"rows_processed":  gorm.Expr("rows_processed + ?", batchRows),
+	}).Error
+}
+
+func applyCDCTransaction(db *gorm.DB, operations []cdcOperation, task *models.SyncTask, systemDB *gorm.DB, streamStarted time.Time) error {
 	if len(operations) == 0 {
 		return nil
 	}
@@ -867,6 +884,8 @@ func applyCDCTransaction(db *gorm.DB, operations []cdcOperation) error {
 		}
 	}
 	// 每批次独立提交，避免单个大事务导致 undo 膨胀和锁竞争
+	// 每写完一批就更新一次任务延迟和速率，避免大事务期间前端指标不刷新
+	processedTotal := 0
 	for _, g := range groups {
 		rows := g.rows
 		for start := 0; start < len(rows); start += cdcMaxBatchRows {
@@ -874,9 +893,15 @@ func applyCDCTransaction(db *gorm.DB, operations []cdcOperation) error {
 			if end > len(rows) {
 				end = len(rows)
 			}
+			batchStart := time.Now()
 			if err := writeMySQLBatch(db, g.mapping, g.columns, rows[start:end]); err != nil {
 				return err
 			}
+			processedTotal += end - start
+			if task != nil && systemDB != nil {
+				applyCDCProgress(systemDB, task.ID, end-start, time.Since(batchStart), streamStarted, processedTotal)
+			}
+			log.Printf("[CDC] 大事务写入进度: task=%d batch=%d total=%d/%d 行", task.ID, end-start, processedTotal, len(operations))
 		}
 	}
 	// delete 操作也独立提交
