@@ -397,7 +397,7 @@ button.modal-backdrop:active:not(:disabled) { position: absolute; inset: 0; padd
 .modal-header p { margin: 5px 0 0; color: var(--text-muted); font-size: 13px; }
 .compact-modal { width: min(440px, 96vw); }
 .task-modal { max-height: calc(100vh - 48px); overflow-y: auto; }
-.task-wizard { width: min(820px, 96vw); padding: 0; overflow: visible; }
+.task-wizard { width: min(960px, 98vw); padding: 0; overflow: visible; }
 .task-wizard .modal-header { margin: 0; padding: 22px 24px 18px; border-bottom: 1px solid var(--border-soft); }
 .wizard-steps { display: grid; grid-template-columns: repeat(5, 1fr); padding: 0 24px; border-bottom: 1px solid var(--border-soft); }
 .wizard-steps button { position: relative; justify-content: center; display: flex; align-items: center; gap: 8px; padding: 14px 10px; color: var(--text-muted); background: transparent; border: 0; border-radius: 0; font-size: 13px; }
@@ -546,6 +546,6 @@ button.modal-backdrop:active:not(:disabled) { position: absolute; inset: 0; padd
   .wizard-grid { grid-template-columns: 1fr; }
   .resource-summary, .resource-grid { grid-template-columns: 1fr; }
   .wizard-body { max-height: calc(100vh - 250px); }
-  .wizard-steps button { font-size: 11px; }
+  .wizard-steps button { font-size: 11px; padding: 12px 6px; }
   .object-picker { grid-template-columns: 1fr; }
 }

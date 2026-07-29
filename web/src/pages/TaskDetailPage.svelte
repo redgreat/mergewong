@@ -419,9 +419,13 @@
   <div class="metric-grid">
     <div class="metric-card"><span><Workflow size={16}/>运行状态</span><strong>{runtimeText(task.runtime_status)}</strong><small>{task.last_run_message || "-"}</small></div>
     <div class="metric-card"><span><Gauge size={16}/>同步速率</span><strong>{(task.rows_per_second || 0).toFixed(1)}</strong><small>行/秒</small></div>
-		<div class="metric-card"><span><Database size={16}/>全量初始化进度</span><strong>{overallPercent.toFixed(1)}%</strong><small>{snapshotProcessed} / {snapshotTotal} 行</small></div>
-	    <div class="metric-card"><span>花费时间</span><strong>{task.phase_started_at ? durationText(task.phase_started_at, task.last_success_at || new Date()) : "-"}</strong><small>已持续</small></div>
-	  </div>
+			<div class="metric-card"><span><Database size={16}/>全量初始化进度</span><strong>{overallPercent.toFixed(1)}%</strong><small>{snapshotProcessed} / {snapshotTotal} 行</small></div>
+		    {#if task.sync_type === "full"}
+		      <div class="metric-card"><span>总计耗时</span><strong>{task.phase_started_at ? durationText(task.phase_started_at, task.last_success_at || new Date()) : "-"}</strong><small>{task.runtime_status === "completed" || task.runtime_status === "failed" ? "已结束" : "进行中"}</small></div>
+		    {:else}
+		      <div class="metric-card"><span><Gauge size={16}/>同步延迟</span><strong>{delayText(task.delay_seconds)}</strong><small>{(task.rows_per_second || 0).toFixed(1)} 行/秒</small></div>
+		    {/if}
+		  </div>
   {#if task.sync_type !== "full"}
   <section class="workspace-panel detail-section trend-section">
     <div class="card-header">
@@ -506,7 +510,10 @@
       {#each task.task_tables || [] as table}<tr><td>{table.source_table}</td><td>{table.target_table}</td><td><span class={`pill ${table.sync_state === "failed" ? "danger" : table.sync_state === "active" ? "success" : "muted"}`}>{stateText(table.sync_state)}</span></td><td><div class="progress-cell"><div class="progress-track"><span style={`width:${Math.min(100, table.progress_percent || 0)}%`}></span></div><strong>{(table.progress_percent || 0).toFixed(1)}%</strong></div></td><td>{table.snapshot_processed || 0} / {table.snapshot_total || 0}</td><td>{table.progress_message || "-"}</td></tr>{/each}
     </tbody></table>
   </section>
-  <section class="workspace-panel detail-section"><div class="card-header"><div><h2>同步信息</h2></div></div><div class="detail-info-grid four-col"><div><span>当前阶段开始</span><strong>{task.phase_started_at ? new Date(task.phase_started_at).toLocaleString() : "-"}</strong></div><div><span>最近成功</span><strong>{task.last_success_at ? new Date(task.last_success_at).toLocaleString() : "-"}</strong></div><div><span>花费时间</span><strong>{task.phase_started_at ? durationText(task.phase_started_at, task.last_success_at || new Date()) : "-"}</strong></div><div><span>预警发送群</span><strong>{task.alert_channel?.name || "未配置"}</strong></div></div></section>
+  <section class="workspace-panel detail-section"><div class="card-header"><div><h2>同步信息</h2></div></div><div class="detail-info-grid"><div><span>同步类型</span><strong>{task.sync_type === "full_cdc" ? "全量 + CDC" : task.sync_type === "cdc" ? "Binlog CDC" : "全量"}</strong></div><div><span>{task.sync_type === "full" ? "开始时间" : "当前阶段开始"}</span><strong>{task.phase_started_at ? new Date(task.phase_started_at).toLocaleString() : "-"}</strong></div><div><span>{task.sync_type === "full" ? "结束时间" : "最近成功"}</span><strong>{task.last_success_at ? new Date(task.last_success_at).toLocaleString() : "-"}</strong></div><div><span>{task.sync_type === "full" ? "总计耗时" : "花费时间"}</span><strong>{task.phase_started_at ? durationText(task.phase_started_at, task.last_success_at || new Date()) : "-"}</strong></div><div><span>预警发送群</span><strong>{task.alert_channel?.name || "未配置"}</strong></div><div><span>批大小</span><strong>{task.sync_batch_size > 0 ? task.sync_batch_size + " 行" : "默认 1000 行"}</strong></div><div><span>表并发</span><strong>{task.snapshot_table_workers > 0 ? task.snapshot_table_workers : "自动"}</strong></div><div><span>分片并发</span><strong>{task.snapshot_shard_workers > 0 ? task.snapshot_shard_workers : "自动"}</strong></div></div></section>
+  {#if task.sync_type === "full"}
+  <section class="workspace-panel detail-section"><div class="card-header"><div><h2>定时任务</h2></div></div><div class="detail-info-grid"><div><span>调度方式</span><strong>{task.schedule_type === "interval" ? "按间隔" : task.schedule_type === "cron" ? "Cron 表达式" : "手动触发"}</strong></div><div><span>间隔分钟</span><strong>{task.schedule_type === "interval" && task.interval_minutes > 0 ? task.interval_minutes + " 分钟" : "-"}</strong></div><div><span>Cron 表达式</span><strong>{task.schedule_type === "cron" && task.cron_expression ? task.cron_expression : "-"}</strong></div></div></section>
+  {/if}
   {#if task.sync_type !== "full"}
   <section class="workspace-panel detail-section">
     <div class="card-header">
