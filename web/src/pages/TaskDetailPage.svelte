@@ -526,7 +526,7 @@
             <td>{(job.progress_percent || 0).toFixed(1)}%</td>
             <td>{#if Number(job.diff_rows || 0) > 0}<button class="link-button" on:click={() => openDiffs(job)}>{job.diff_rows}</button>{:else}0{/if}</td>
             <td>{job.repaired_rows || 0}</td>
-            <td><div class="repair-desc"><span class="repair-desc-msg">{job.error_detail || job.message || "-"}</span>{#if job.cutoff_from || job.cutoff_time}<button class="link-button" on:click={() => showJobDetail = job}>详情</button>{:else if job.cutoff_column || job.cutoff_time}<span class="cell-sub">{#if job.cutoff_column}{job.cutoff_column}{/if}{#if job.cutoff_time} ≤ {new Date(job.cutoff_time).toLocaleString()}{/if}</span>{/if}</div></td>
+            <td><div class="repair-desc"><span class="repair-desc-msg">{job.error_detail || job.message || "-"}</span>{#if job.cutoff_from || job.cutoff_time}<button class="link-button" on:click={() => showJobDetail = job} title="详情">…</button>{:else if job.cutoff_column || job.cutoff_time}<span class="cell-sub">{#if job.cutoff_column}{job.cutoff_column}{/if}{#if job.cutoff_time} ≤ {new Date(job.cutoff_time).toLocaleString()}{/if}</span>{/if}</div></td>
             <td>{job.started_at ? new Date(job.started_at).toLocaleString() : "-"}</td>
             {#if canManage}<td>{#if canRepairJob(job)}<button class="ghost icon-text" disabled={repairBusy || !!runningJob} on:click={() => startRepair(job)}><RotateCw size={14}/>补这次</button>{:else if job.status === "running" || job.status === "canceling"}<button class="ghost icon-text" disabled={repairBusy} on:click={() => confirmCancel(job)}><X size={14}/>取消</button>{:else}-{/if}</td>{/if}
           </tr>
