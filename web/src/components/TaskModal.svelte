@@ -315,6 +315,12 @@
                           </div>
                         {/if}
                       {/if}
+                      <div class="field-map-section">
+                        <div class="field-map-section-title">自定义 WHERE 条件（可选）</div>
+                        <div class="field-map-add custom-where">
+                          <input type="text" bind:value={table.custom_where} placeholder="例如 CreatedAt >= DATE_SUB(CURDATE(), INTERVAL 1 DAY)" />
+                        </div>
+                      </div>
                     </div>
                   {/if}
                 </div>{/each}{/if}

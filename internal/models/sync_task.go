@@ -126,6 +126,7 @@ type SyncTaskTable struct {
 	FieldMapping        FieldMapping `gorm:"type:json" json:"field_mapping"`
 	IgnoredFields       StringList   `gorm:"type:json" json:"ignored_fields"`
 	TypeMismatchIgnores StringList   `gorm:"type:json" json:"type_mismatch_ignores"`
+	CustomWhere         string       `gorm:"type:text" json:"custom_where,omitempty"`
 	Position            int          `gorm:"not null;default:0" json:"position"`
 	SourcePrimaryKey    string       `gorm:"size:100" json:"source_primary_key"`
 	TargetPrimaryKey    string       `gorm:"size:100" json:"target_primary_key"`

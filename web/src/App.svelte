@@ -482,7 +482,7 @@
       source_table: task.source_table,
       target_db: task.target_db,
       target_table: task.target_table,
-      table_mappings: (task.task_tables?.length ? task.task_tables : [{ source_table: task.source_table, target_table: task.target_table, field_mapping: task.field_mapping || {} }]).map((table) => ({ source_table: table.source_table, target_table: table.target_table, field_mapping: table.field_mapping || {}, ignored_fields: table.ignored_fields || [], type_mismatch_ignores: table.type_mismatch_ignores || [] })),
+      table_mappings: (task.task_tables?.length ? task.task_tables : [{ source_table: task.source_table, target_table: task.target_table, field_mapping: task.field_mapping || {} }]).map((table) => ({ source_table: table.source_table, target_table: table.target_table, field_mapping: table.field_mapping || {}, ignored_fields: table.ignored_fields || [], type_mismatch_ignores: table.type_mismatch_ignores || [], custom_where: table.custom_where || "" })),
       sync_type: task.sync_type,
 	  schedule_type: "manual",
       interval_minutes: task.interval_minutes || 5,
@@ -540,7 +540,8 @@
 	    target_table: table.target_table.trim(),
 	    field_mapping: normalizeFieldMapping(table.field_mapping),
 	    ignored_fields: table.ignored_fields || [],
-	    type_mismatch_ignores: table.type_mismatch_ignores || []
+	    type_mismatch_ignores: table.type_mismatch_ignores || [],
+	    custom_where: table.custom_where || ""
 	  }));
 	  payload.source_table = payload.tables[0].source_table;
 	  payload.target_table = payload.tables[0].target_table;

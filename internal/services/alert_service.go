@@ -125,7 +125,16 @@ func (s *AlertService) CheckTaskAlerts(ctx context.Context) error {
 			_ = s.ResolveTaskAlertSilent(task.ID, "error")
 			continue
 		}
+		// 全量任务只检测执行失败
 		if task.SyncType == "full" {
+			if task.RuntimeStatus == "failed" && task.LastRunStatus == "failed" {
+				content := fmt.Sprintf("全量同步任务执行失败\n任务：%s\n错误信息：%s", task.Name, task.LastRunMessage)
+				_ = s.SendTaskAlert(ctx, task, "error", content)
+				_ = s.ResolveTaskAlertSilent(task.ID, "delay")
+			} else {
+				// 全量任务非失败状态不触发任何预警
+				_ = s.ResolveTaskAlertSilent(task.ID, "error")
+			}
 			continue
 		}
 

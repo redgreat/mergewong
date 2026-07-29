@@ -17,6 +17,14 @@
     return type;
   };
   const diffTypeText = (type) => ({ missing_target:"目标缺少", missing_source:"源端缺少", mismatch:"字段不一致" }[type] || type || "-");
+  const durationText = (from, to) => {
+    const diff = Math.floor((new Date(to) - new Date(from)) / 1000);
+    if (diff <= 0) return "0 秒";
+    if (diff < 60) return `${diff} 秒`;
+    if (diff < 3600) return `${Math.floor(diff / 60)} 分 ${diff % 60} 秒`;
+    if (diff < 86400) return `${Math.floor(diff / 3600)} 小时 ${Math.floor((diff % 3600) / 60)} 分`;
+    return `${Math.floor(diff / 86400)} 天 ${Math.floor((diff % 86400) / 3600)} 小时`;
+  };
   const delayText = (seconds=0) => {
     if (seconds <= 0) return "0 ms";
     if (seconds < 60) return `${(seconds * 1000).toLocaleString()} ms`;
@@ -414,22 +422,22 @@
 	<div class="metric-card"><span><Database size={16}/>全量初始化进度</span><strong>{overallPercent.toFixed(1)}%</strong><small>{snapshotProcessed} / {snapshotTotal} 行</small></div>
     <div class="metric-card"><span>Binlog 位点</span><strong class="position-text">{task.cdc_checkpoint?.binlog_file || "-"}</strong><small>{task.cdc_checkpoint?.binlog_position || "-"}</small></div>
   </div>
+  {#if task.sync_type !== "full"}
   <section class="workspace-panel detail-section trend-section">
     <div class="card-header">
       <div><h2>运行趋势</h2><p>保留最近 30 天的同步延迟、读取和增改删行数。</p></div>
-      <div class="header-actions metric-range-actions">
-        <button class:active-filter={metricRange === "24h"} class="ghost" on:click={() => setMetricRange("24h")}>24小时</button>
-        <button class:active-filter={metricRange === "7d"} class="ghost" on:click={() => setMetricRange("7d")}>7天</button>
-        <button class:active-filter={metricRange === "30d"} class="ghost" on:click={() => setMetricRange("30d")}>30天</button>
-        <button class="ghost icon-text" on:click={loadMetrics}><RefreshCw size={15}/>查询</button>
-      </div>
+      {#if task.sync_type !== "full"}
+        <div class="header-actions metric-range-actions">
+          <button class:active-filter={metricRange === "24h"} class="ghost" on:click={() => setMetricRange("24h")}>24小时</button>
+          <button class:active-filter={metricRange === "7d"} class="ghost" on:click={() => setMetricRange("7d")}>7天</button>
+          <button class:active-filter={metricRange === "30d"} class="ghost" on:click={() => setMetricRange("30d")}>30天</button>
+          <button class="ghost icon-text" on:click={loadMetrics}><RefreshCw size={15}/>查询</button>
+        </div>
+      {/if}
     </div>
-    <div class="metric-query-row">
-      <label>开始时间<input type="datetime-local" step="1" bind:value={metricFrom} /></label>
-      <label>结束时间<input type="datetime-local" step="1" bind:value={metricTo} /></label>
-    </div>
-    {#if metricError}<div class="inline-error">{metricError}</div>{/if}
-    {#if metricPoints.length === 0}
+    {#if metricError}
+      <div class="inline-error">{metricError}</div>
+    {:else if metricPoints.length === 0}
       <div class="empty-state trend-empty"><strong>暂无历史指标</strong><p>增量同步产生新事务后，会按分钟写入趋势数据。</p></div>
     {:else}
       <div class="trend-grid">
@@ -492,12 +500,13 @@
       <div class="trend-foot">范围：{metricTime(metricPoints[0]?.time)} 至 {metricTime(metricPoints[metricPoints.length - 1]?.time)}</div>
     {/if}
   </section>
+  {/if}
   <section class="workspace-panel detail-section"><div class="card-header"><div><h2>同步进度</h2><p>新增表会先独立初始化并追平主链路，再自动合并。</p></div></div>
     <table class="data-table"><thead><tr><th>源表</th><th>目标表</th><th>阶段</th><th>初始化进度</th><th>已初始化 / 总行数</th><th>说明</th></tr></thead><tbody>
       {#each task.task_tables || [] as table}<tr><td>{table.source_table}</td><td>{table.target_table}</td><td><span class={`pill ${table.sync_state === "failed" ? "danger" : table.sync_state === "active" ? "success" : "muted"}`}>{stateText(table.sync_state)}</span></td><td><div class="progress-cell"><div class="progress-track"><span style={`width:${Math.min(100, table.progress_percent || 0)}%`}></span></div><strong>{(table.progress_percent || 0).toFixed(1)}%</strong></div></td><td>{table.snapshot_processed || 0} / {table.snapshot_total || 0}</td><td>{table.progress_message || "-"}</td></tr>{/each}
     </tbody></table>
   </section>
-  <section class="workspace-panel detail-section"><div class="card-header"><div><h2>同步信息</h2></div></div><div class="detail-info-grid"><div><span>同步类型</span><strong>{task.sync_type === "full_cdc" ? "全量 + CDC" : task.sync_type === "cdc" ? "Binlog CDC" : "全量"}</strong></div><div><span>最近成功</span><strong>{task.last_success_at ? new Date(task.last_success_at).toLocaleString() : "-"}</strong></div><div><span>预警发送群</span><strong>{task.alert_channel?.name || "未配置"}</strong></div><div><span>当前阶段开始</span><strong>{task.phase_started_at ? new Date(task.phase_started_at).toLocaleString() : "-"}</strong></div></div></section>
+  <section class="workspace-panel detail-section"><div class="card-header"><div><h2>同步信息</h2></div></div><div class="detail-info-grid"><div><span>同步类型</span><strong>{task.sync_type === "full_cdc" ? "全量 + CDC" : task.sync_type === "cdc" ? "Binlog CDC" : "全量"}</strong></div><div><span>当前阶段开始</span><strong>{task.phase_started_at ? new Date(task.phase_started_at).toLocaleString() : "-"}</strong></div><div><span>最近成功</span><strong>{task.last_success_at ? new Date(task.last_success_at).toLocaleString() : "-"}</strong></div><div><span>花费时间</span><strong>{task.phase_started_at ? durationText(task.phase_started_at, task.last_success_at || new Date()) : "-"}</strong></div><div><span>预警发送群</span><strong>{task.alert_channel?.name || "未配置"}</strong></div></div></section>
   {#if task.sync_type !== "full"}
   <section class="workspace-panel detail-section">
     <div class="card-header">

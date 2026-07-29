@@ -377,6 +377,11 @@ func readMySQLBatch(task *models.SyncTask, mapping *models.SyncTaskTable, db *go
 		}
 		query += " ORDER BY " + pk
 	}
+	if mapping.CustomWhere != "" && !strings.Contains(query, "WHERE") {
+		query += " WHERE (" + mapping.CustomWhere + ")"
+	} else if mapping.CustomWhere != "" {
+		query += " AND (" + mapping.CustomWhere + ")"
+	}
 	query += fmt.Sprintf(" LIMIT %d", snapshotBatchSize(task))
 	rows, err := db.Raw(query, params...).Rows()
 	if err != nil {
@@ -440,6 +445,9 @@ func readMySQLShardBatch(task *models.SyncTask, mapping *models.SyncTaskTable, d
 	if shard.UpperBound != "" {
 		wheres = append(wheres, pk+" <= ?")
 		params = append(params, shard.UpperBound)
+	}
+	if mapping.CustomWhere != "" {
+		wheres = append(wheres, "("+mapping.CustomWhere+")")
 	}
 	if len(wheres) > 0 {
 		query += " WHERE " + strings.Join(wheres, " AND ")
