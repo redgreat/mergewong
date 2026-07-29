@@ -12,7 +12,23 @@
   const jobText = (status) => ({ running:"执行中", canceling:"取消中", canceled:"已取消", success:"完成", failed:"失败" }[status] || status || "-");
   const jobTypeText = (type) => ({ compare:"全量对比", repair:"补数" }[type] || type);
   const diffTypeText = (type) => ({ missing_target:"目标缺少", missing_source:"源端缺少", mismatch:"字段不一致" }[type] || type || "-");
-  const delayText = (seconds=0) => `${(seconds * 1000).toLocaleString()} ms`;
+  const delayText = (seconds=0) => {
+    if (seconds <= 0) return "0 ms";
+    if (seconds < 60) return `${(seconds * 1000).toLocaleString()} ms`;
+    if (seconds < 3600) {
+      const m = Math.floor(seconds / 60);
+      const s = seconds % 60;
+      return s > 0 ? `${m} 分 ${s} 秒` : `${m} 分钟`;
+    }
+    if (seconds < 86400) {
+      const h = Math.floor(seconds / 3600);
+      const m = Math.floor((seconds % 3600) / 60);
+      return m > 0 ? `${h} 小时 ${m} 分` : `${h} 小时`;
+    }
+    const d = Math.floor(seconds / 86400);
+    const h = Math.floor((seconds % 86400) / 3600);
+    return h > 0 ? `${d} 天 ${h} 小时` : `${d} 天`;
+  };
   const chartLeft = 46;
   const chartRight = 576;
   const chartTop = 20;

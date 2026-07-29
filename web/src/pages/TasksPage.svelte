@@ -13,7 +13,24 @@
   const statusText = (task) => ({ pending: "待预检查", initializing: "全量初始化", catching_up: "增量追数", cdc_running: "增量同步中", paused: "暂停", stopped: "停止", completed: "完成", failed: "失败" }[task.validation_status === "pending" ? "pending" : task.runtime_status] || "停止");
   const statusClass = (task) => task.runtime_status === "failed" ? "danger" : ["initializing", "catching_up", "cdc_running"].includes(task.runtime_status) ? "success" : "muted";
   const runningStates = ["initializing", "catching_up", "cdc_running"];
-  const delayText = (seconds) => seconds == null ? "-" : `${(seconds * 1000).toLocaleString()} ms`;
+  const delayText = (seconds) => {
+    if (seconds == null) return "-";
+    if (seconds <= 0) return "0 ms";
+    if (seconds < 60) return `${(seconds * 1000).toLocaleString()} ms`;
+    if (seconds < 3600) {
+      const m = Math.floor(seconds / 60);
+      const s = seconds % 60;
+      return s > 0 ? `${m} 分 ${s} 秒` : `${m} 分钟`;
+    }
+    if (seconds < 86400) {
+      const h = Math.floor(seconds / 3600);
+      const m = Math.floor((seconds % 3600) / 60);
+      return m > 0 ? `${h} 小时 ${m} 分` : `${h} 小时`;
+    }
+    const d = Math.floor(seconds / 86400);
+    const h = Math.floor((seconds % 86400) / 3600);
+    return h > 0 ? `${d} 天 ${h} 小时` : `${d} 天`;
+  };
   const speedText = (speed) => {
     const value = Number(speed || 0);
     if (value <= 0) return "0r/s";
