@@ -525,6 +525,16 @@ button.modal-backdrop:active:not(:disabled) { position: absolute; inset: 0; padd
 .job-detail-count { color: var(--text-muted); font-size: 12px; }
 .job-detail-table { margin-bottom: 12px; }
 
+/* ------ actions dropdown -------------------------------------------------- */
+.actions-cell { position: relative; }
+.actions-dropdown { display: inline-block; position: relative; }
+.actions-dropdown > .ghost.icon-text { padding: 6px 10px; font-size: 16px; letter-spacing: 2px; }
+.dropdown-menu { position: absolute; right: 0; top: calc(100% + 4px); z-index: 12; min-width: 100px; padding: 4px; background: var(--surface-raised); border: 1px solid var(--border); border-radius: 9px; box-shadow: var(--shadow); }
+.dropdown-menu button { display: block; width: 100%; padding: 7px 12px; color: var(--text-secondary); background: transparent; border: 0; border-radius: 6px; font-size: 13px; font-weight: 550; text-align: left; }
+.dropdown-menu button:hover:not(:disabled) { color: var(--text); background: var(--primary-soft); }
+.dropdown-menu button:disabled { opacity: .35; }
+.dropdown-backdrop { position: fixed; inset: 0; z-index: 11; padding: 0; border: 0; background: transparent; }
+
 @keyframes modalPop { from { opacity: 0; transform: translateY(8px) scale(.99); } }
 
 @media (max-width: 980px) {
