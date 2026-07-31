@@ -649,7 +649,13 @@ func syncColumnPairs(db *gorm.DB, mapping *models.SyncTaskTable, sourceColumns [
 }
 
 func cachedMySQLColumnNames(db *gorm.DB, table string) ([]string, error) {
-	key := fmt.Sprintf("%p:%s", db.Statement.ConnPool, table)
+	// 缓存 key 用数据库 DSN + 表名，不用 %p 指针（事务创建的 ConnPool 每次不同导致缓存失效）
+	key := ""
+	if sqlDB, err := db.DB(); err == nil {
+		key = fmt.Sprintf("%p:%s", sqlDB, table)
+	} else {
+		key = table
+	}
 	if cached, ok := mysqlColumnNameCache.Load(key); ok {
 		return cached.([]string), nil
 	}

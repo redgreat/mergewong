@@ -389,6 +389,8 @@ func (m *CDCManager) stream(ctx context.Context, task *models.SyncTask, source *
 	lastMetricsOps := cdcOperationMetrics{}
 	var sessionRows int64
 	var opMetrics cdcOperationMetrics
+	// 小事务合并缓冲：累积多个小事务，凑满或超时后统一写入，减少目标库事务提交次数
+	mergeBuf := newCDCMergeBuffer(task, m.service.systemDB, streamStarted)
 	_ = m.service.UpdateTask(task.ID, map[string]interface{}{"runtime_status": "catching_up", "phase_started_at": &streamStarted, "last_run_message": "增量追数中"})
 
 	startTitle := "Binlog 增量同步开始"
@@ -401,7 +403,31 @@ func (m *CDCManager) stream(ctx context.Context, task *models.SyncTask, source *
 		if err != nil {
 			return err
 		}
+		// 合并缓冲超时检查：缓冲非空且已到最大等待时间，先提交
+		if mergeBuf.size() > 0 && time.Since(mergeBuf.lastAppended) >= cdcMergeMaxWait {
+			bufRows := int64(mergeBuf.size())
+			if err := mergeBuf.flush(targetDB); err != nil {
+				return err
+			}
+			sessionRows += bufRows
+			if err := m.advanceCheckpoint(task, checkpoint, mergeBuf.lastFile, mergeBuf.lastPos, sessionRows, streamStarted, mergeBuf.lastEventTs, &lastMetricsUpdate, &lastMetricsLog, &lastMetricsRows, &lastMetricsOps, opMetrics); err != nil {
+				return err
+			}
+			mergeBuf.clear(currentFile, event.Header.LogPos, event.Header.Timestamp)
+		}
 		if event.Header.EventType == replication.XA_PREPARE_LOG_EVENT {
+			// XA 事务不参与合并，先 flush 合并缓冲保证顺序
+			if mergeBuf.size() > 0 {
+				bufRows := int64(mergeBuf.size())
+				if err := mergeBuf.flush(targetDB); err != nil {
+					return err
+				}
+				sessionRows += bufRows
+				if err := m.advanceCheckpoint(task, checkpoint, mergeBuf.lastFile, mergeBuf.lastPos, sessionRows, streamStarted, mergeBuf.lastEventTs, &lastMetricsUpdate, &lastMetricsLog, &lastMetricsRows, &lastMetricsOps, opMetrics); err != nil {
+					return err
+				}
+				mergeBuf.clear(currentFile, event.Header.LogPos, event.Header.Timestamp)
+			}
 			xidKey, onePhase, parseErr := parseXAPrepareEvent(event.RawData)
 			if parseErr != nil {
 				return parseErr
@@ -471,6 +497,18 @@ func (m *CDCManager) stream(ctx context.Context, task *models.SyncTask, source *
 			// 虽然破坏了单个源事务的原子性，但 upsert 幂等保证最终一致性
 			if len(operations) >= 100000 {
 				log.Printf("[CDC] 任务 %d 内存保护触发: 缓存 %d 行，提前写入", task.ID, len(operations))
+				// 先 flush 合并缓冲保证顺序
+				if mergeBuf.size() > 0 {
+					bufRows := int64(mergeBuf.size())
+					if err := mergeBuf.flush(targetDB); err != nil {
+						return err
+					}
+					sessionRows += bufRows
+					if err := m.advanceCheckpoint(task, checkpoint, mergeBuf.lastFile, mergeBuf.lastPos, sessionRows, streamStarted, mergeBuf.lastEventTs, &lastMetricsUpdate, &lastMetricsLog, &lastMetricsRows, &lastMetricsOps, opMetrics); err != nil {
+						return err
+					}
+					mergeBuf.clear(currentFile, event.Header.LogPos, event.Header.Timestamp)
+				}
 				if err := applyCDCTransaction(targetDB, operations, task, m.service.systemDB, streamStarted); err != nil {
 					return err
 				}
@@ -480,18 +518,65 @@ func (m *CDCManager) stream(ctx context.Context, task *models.SyncTask, source *
 			// #region debug-point A:xid_event_before_apply
 			xaDebugReport("A", "cdc_service.go:XIDEvent", "XIDEvent 提交点触发 apply", map[string]interface{}{"task_id": task.ID, "ops_len": len(operations), "file": currentFile, "pos": event.Header.LogPos, "event_ts": event.Header.Timestamp})
 			// #endregion
+			// 非空行数需求：先算当前事务行数
 			applied := int64(len(operations))
-			if err := applyCDCTransaction(targetDB, operations, task, m.service.systemDB, streamStarted); err != nil {
-				// #region debug-point D:apply_error
-				xaDebugReport("D", "cdc_service.go:XIDEvent", "applyCDCTransaction 返回错误", map[string]interface{}{"task_id": task.ID, "ops_len": len(operations), "err": err.Error()})
-				// #endregion
-				return err
+			// 如果已有合并缓冲，先判断是否需要先行 flush（避免堆积过多）
+			if mergeBuf.size() > 0 && mergeBuf.ready() {
+				if err := mergeBuf.flush(targetDB); err != nil {
+					return err
+				}
+				bufRows := int64(mergeBuf.size())
+				sessionRows += bufRows
+				if err := m.advanceCheckpoint(task, checkpoint, mergeBuf.lastFile, mergeBuf.lastPos, sessionRows, streamStarted, mergeBuf.lastEventTs, &lastMetricsUpdate, &lastMetricsLog, &lastMetricsRows, &lastMetricsOps, opMetrics); err != nil {
+					return err
+				}
+				mergeBuf.clear(currentFile, event.Header.LogPos, event.Header.Timestamp)
 			}
-			operations = operations[:0]
-			sessionRows += applied
-			if err := m.advanceCheckpoint(task, checkpoint, currentFile, event.Header.LogPos, sessionRows, streamStarted, event.Header.Timestamp, &lastMetricsUpdate, &lastMetricsLog, &lastMetricsRows, &lastMetricsOps, opMetrics); err != nil {
-				return err
+			if applied < int64(cdcTxnMergeThreshold) && applied > 0 {
+				// 小事务：进合并缓冲
+				mergeBuf.append(operations, currentFile, event.Header.LogPos, event.Header.Timestamp)
+				operations = operations[:0]
+				// 如果缓冲已凑满批次大小或超时，立即 flush
+				if mergeBuf.ready() && mergeBuf.size() >= cdcMaxBatchRows(task) {
+					bufRows := int64(mergeBuf.size())
+					if err := mergeBuf.flush(targetDB); err != nil {
+						return err
+					}
+					sessionRows += bufRows
+					if err := m.advanceCheckpoint(task, checkpoint, mergeBuf.lastFile, mergeBuf.lastPos, sessionRows, streamStarted, mergeBuf.lastEventTs, &lastMetricsUpdate, &lastMetricsLog, &lastMetricsRows, &lastMetricsOps, opMetrics); err != nil {
+						return err
+					}
+					mergeBuf.clear(currentFile, event.Header.LogPos, event.Header.Timestamp)
+				}
+				continue
 			}
+			// 大事务或空事务：立即写入（先 flush 合并缓冲保证顺序）
+			if mergeBuf.size() > 0 {
+				bufRows := int64(mergeBuf.size())
+				if err := mergeBuf.flush(targetDB); err != nil {
+					return err
+				}
+				sessionRows += bufRows
+				if err := m.advanceCheckpoint(task, checkpoint, mergeBuf.lastFile, mergeBuf.lastPos, sessionRows, streamStarted, mergeBuf.lastEventTs, &lastMetricsUpdate, &lastMetricsLog, &lastMetricsRows, &lastMetricsOps, opMetrics); err != nil {
+					return err
+				}
+				mergeBuf.clear(currentFile, event.Header.LogPos, event.Header.Timestamp)
+			}
+			if applied > 0 {
+				if err := applyCDCTransaction(targetDB, operations, task, m.service.systemDB, streamStarted); err != nil {
+					// #region debug-point D:apply_error
+					xaDebugReport("D", "cdc_service.go:XIDEvent", "applyCDCTransaction 返回错误", map[string]interface{}{"task_id": task.ID, "ops_len": len(operations), "err": err.Error()})
+					// #endregion
+					return err
+				}
+				operations = operations[:0]
+				sessionRows += applied
+				if err := m.advanceCheckpoint(task, checkpoint, currentFile, event.Header.LogPos, sessionRows, streamStarted, event.Header.Timestamp, &lastMetricsUpdate, &lastMetricsLog, &lastMetricsRows, &lastMetricsOps, opMetrics); err != nil {
+					return err
+				}
+			}
+			// 空事务：无 operations 不写入，仅推进 checkpoint
+			continue
 		case *replication.QueryEvent:
 			rawQuery := strings.TrimSpace(string(e.Query))
 			query := strings.ToUpper(rawQuery)
@@ -499,6 +584,18 @@ func (m *CDCManager) stream(ctx context.Context, task *models.SyncTask, source *
 				// #region debug-point A:xa_query_detected
 				xaDebugReport("A", "cdc_service.go:QueryEvent", "识别到 XA QueryEvent", map[string]interface{}{"task_id": task.ID, "action": action, "xid_key": xidKey, "raw": rawQuery, "ops_len": len(operations), "file": currentFile, "pos": event.Header.LogPos, "event_ts": event.Header.Timestamp})
 				// #endregion
+				// XA 事务不参与合并，先 flush 合并缓冲保证顺序
+				if mergeBuf.size() > 0 {
+					bufRows := int64(mergeBuf.size())
+					if err := mergeBuf.flush(targetDB); err != nil {
+						return err
+					}
+					sessionRows += bufRows
+					if err := m.advanceCheckpoint(task, checkpoint, mergeBuf.lastFile, mergeBuf.lastPos, sessionRows, streamStarted, mergeBuf.lastEventTs, &lastMetricsUpdate, &lastMetricsLog, &lastMetricsRows, &lastMetricsOps, opMetrics); err != nil {
+						return err
+					}
+					mergeBuf.clear(currentFile, event.Header.LogPos, event.Header.Timestamp)
+				}
 				applied := int64(0)
 				deletePrepared := action == "rollback"
 				switch action {
@@ -556,13 +653,44 @@ func (m *CDCManager) stream(ctx context.Context, task *models.SyncTask, source *
 			}
 			if query == "COMMIT" {
 				applied := int64(len(operations))
-				if err := applyCDCTransaction(targetDB, operations, task, m.service.systemDB, streamStarted); err != nil {
-					return err
+				// 小事务进合并缓冲
+				if applied < int64(cdcTxnMergeThreshold) && applied > 0 {
+					mergeBuf.append(operations, currentFile, event.Header.LogPos, event.Header.Timestamp)
+					operations = operations[:0]
+					if mergeBuf.size() >= cdcMaxBatchRows(task) {
+						bufRows := int64(mergeBuf.size())
+						if err := mergeBuf.flush(targetDB); err != nil {
+							return err
+						}
+						sessionRows += bufRows
+						if err := m.advanceCheckpoint(task, checkpoint, mergeBuf.lastFile, mergeBuf.lastPos, sessionRows, streamStarted, mergeBuf.lastEventTs, &lastMetricsUpdate, &lastMetricsLog, &lastMetricsRows, &lastMetricsOps, opMetrics); err != nil {
+							return err
+						}
+						mergeBuf.clear(currentFile, event.Header.LogPos, event.Header.Timestamp)
+					}
+					continue
 				}
-				operations = operations[:0]
-				sessionRows += applied
-				if err := m.advanceCheckpoint(task, checkpoint, currentFile, event.Header.LogPos, sessionRows, streamStarted, event.Header.Timestamp, &lastMetricsUpdate, &lastMetricsLog, &lastMetricsRows, &lastMetricsOps, opMetrics); err != nil {
-					return err
+				// 大事务直接写（先 flush 合并缓冲保证顺序）
+				if mergeBuf.size() > 0 {
+					bufRows := int64(mergeBuf.size())
+					if err := mergeBuf.flush(targetDB); err != nil {
+						return err
+					}
+					sessionRows += bufRows
+					if err := m.advanceCheckpoint(task, checkpoint, mergeBuf.lastFile, mergeBuf.lastPos, sessionRows, streamStarted, mergeBuf.lastEventTs, &lastMetricsUpdate, &lastMetricsLog, &lastMetricsRows, &lastMetricsOps, opMetrics); err != nil {
+						return err
+					}
+					mergeBuf.clear(currentFile, event.Header.LogPos, event.Header.Timestamp)
+				}
+				if applied > 0 {
+					if err := applyCDCTransaction(targetDB, operations, task, m.service.systemDB, streamStarted); err != nil {
+						return err
+					}
+					operations = operations[:0]
+					sessionRows += applied
+					if err := m.advanceCheckpoint(task, checkpoint, currentFile, event.Header.LogPos, sessionRows, streamStarted, event.Header.Timestamp, &lastMetricsUpdate, &lastMetricsLog, &lastMetricsRows, &lastMetricsOps, opMetrics); err != nil {
+						return err
+					}
 				}
 			}
 		}
@@ -851,12 +979,93 @@ func cdcMaxBatchRows(task *models.SyncTask) int {
 	return 1000
 }
 
-// applyCDCProgress 在 CDC 大事务写入期间更新任务速率和延迟，不推进检查点
-func applyCDCProgress(systemDB *gorm.DB, taskID uint, batchRows int, batchDuration time.Duration, streamStarted time.Time, totalProcessed int) {
-	now := time.Now()
-	if batchDuration > 0 {
-		_ = float64(batchRows) / batchDuration.Seconds()
+// cdcTxnMergeThreshold 单个源事务行数小于该值时进入合并缓冲
+// 大于等于该值的事务视为大事务，直接立即写入
+// 合并批大小仍以 cdcMaxBatchRows 为准
+const cdcTxnMergeThreshold = 50
+
+// cdcMergeMaxWait 合并缓冲最大等待时长，避免低负载时提交位点延迟过大
+const cdcMergeMaxWait = 3 * time.Second
+
+// cdcMergeBuffer 合并小事务的缓冲
+// 累积多个小事务的 operations，凑满或超时后一次性写入，减少目标库事务提交次数
+type cdcMergeBuffer struct {
+	task          *models.SyncTask
+	systemDB      *gorm.DB
+	streamStarted time.Time
+	ops           []cdcOperation
+	// 记录缓冲内涉及的文件位点，供推进 checkpoint 使用
+	lastFile     string
+	lastPos      uint32
+	lastEventTs  uint32
+	lastAppended time.Time
+}
+
+func newCDCMergeBuffer(task *models.SyncTask, systemDB *gorm.DB, streamStarted time.Time) *cdcMergeBuffer {
+	return &cdcMergeBuffer{task: task, systemDB: systemDB, streamStarted: streamStarted}
+}
+
+// append 将一个小事务的 operations 追加到缓冲
+func (b *cdcMergeBuffer) append(ops []cdcOperation, file string, pos, eventTs uint32) {
+	b.ops = append(b.ops, ops...)
+	b.lastFile = file
+	b.lastPos = pos
+	b.lastEventTs = eventTs
+	b.lastAppended = time.Now()
+}
+
+// size 当前缓冲行数
+func (b *cdcMergeBuffer) size() int {
+	return len(b.ops)
+}
+
+// ready 判断是否达到提交条件：累积行数达到批大小，或等待超时
+func (b *cdcMergeBuffer) ready() bool {
+	if len(b.ops) == 0 {
+		return false
 	}
+	if len(b.ops) >= cdcMaxBatchRows(b.task) {
+		return true
+	}
+	return time.Since(b.lastAppended) >= cdcMergeMaxWait
+}
+
+// flush 将缓冲内所有 operations 一次性写入目标库
+func (b *cdcMergeBuffer) flush(db *gorm.DB) error {
+	if len(b.ops) == 0 {
+		return nil
+	}
+	log.Printf("[CDC] 合并事务提交: task=%d 合并 %d 行 位点 %s:%d", b.task.ID, len(b.ops), b.lastFile, b.lastPos)
+	return applyCDCTransaction(db, b.ops, b.task, b.systemDB, b.streamStarted)
+}
+
+// clear 清空缓冲
+func (b *cdcMergeBuffer) clear(file string, pos, eventTs uint32) {
+	b.ops = b.ops[:0]
+	b.lastFile = file
+	b.lastPos = pos
+	b.lastEventTs = eventTs
+	b.lastAppended = time.Time{}
+}
+
+// cdcProgressUpdateInterval 控制指标更新的最小间隔，避免每个小事务都写一次系统库
+const cdcProgressUpdateInterval = 2 * time.Second
+
+// applyCDCProgress 在 CDC 大事务写入期间更新任务速率和延迟，不推进检查点
+// 每 2 秒最多更新一次，避免源库高频小事务导致系统库 IO 成为瓶颈
+var cdcLastProgressUpdate = make(map[uint]time.Time)
+var cdcLastProgressMu sync.Mutex
+
+func applyCDCProgress(systemDB *gorm.DB, taskID uint, batchRows int, batchDuration time.Duration, streamStarted time.Time, totalProcessed int) {
+	cdcLastProgressMu.Lock()
+	last, ok := cdcLastProgressUpdate[taskID]
+	now := time.Now()
+	if ok && now.Sub(last) < cdcProgressUpdateInterval {
+		cdcLastProgressMu.Unlock()
+		return
+	}
+	cdcLastProgressUpdate[taskID] = now
+	cdcLastProgressMu.Unlock()
 	elapsed := now.Sub(streamStarted).Seconds()
 	avgSpeed := float64(0)
 	if elapsed > 0 {
