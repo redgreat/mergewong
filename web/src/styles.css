@@ -399,13 +399,18 @@ button.modal-backdrop:active:not(:disabled) { position: absolute; inset: 0; padd
 .task-modal { max-height: calc(100vh - 48px); overflow-y: auto; }
 .task-wizard { width: min(960px, 98vw); padding: 0; overflow: visible; }
 .task-wizard .modal-header { margin: 0; padding: 22px 24px 18px; border-bottom: 1px solid var(--border-soft); }
-.wizard-steps { display: grid; grid-template-columns: repeat(5, 1fr); padding: 0 24px; border-bottom: 1px solid var(--border-soft); }
-.wizard-steps button { position: relative; justify-content: center; display: flex; align-items: center; gap: 8px; padding: 14px 10px; color: var(--text-muted); background: transparent; border: 0; border-radius: 0; font-size: 13px; }
+.wizard-steps { display: flex; align-items: center; padding: 18px 24px 22px; border-bottom: 1px solid var(--border-soft); }
+.wizard-steps button { position: relative; display: flex; flex-direction: column; align-items: center; gap: 6px; flex: 1; min-width: 0; padding: 0; color: var(--text-muted); background: transparent; border: 0; border-radius: 0; font-size: 12px; }
 .wizard-steps button:hover:not(:disabled) { color: var(--text); background: transparent; }
+.wizard-steps button:disabled { cursor: not-allowed; opacity: .55; }
 .wizard-steps button.active { color: var(--primary); }
-.wizard-steps button.active::after { content: ""; position: absolute; left: 22%; right: 22%; bottom: -1px; height: 2px; background: var(--primary); }
-.wizard-steps button > span { display: inline-grid; place-items: center; width: 22px; height: 22px; border: 1px solid var(--border); border-radius: 50%; font-size: 11px; }
-.wizard-steps button.active > span, .wizard-steps button.done > span { color: #fff; background: var(--primary); border-color: var(--primary); }
+.wizard-steps button.done { color: var(--primary); }
+.step-dot { display: grid; place-items: center; width: 26px; height: 26px; border: 1.5px solid var(--border); border-radius: 50%; font-size: 12px; font-weight: 600; background: var(--surface); transition: all .2s; }
+.wizard-steps button.active .step-dot { color: #fff; background: var(--primary); border-color: var(--primary); box-shadow: 0 0 0 3px var(--primary-soft); }
+.wizard-steps button.done .step-dot { color: #fff; background: var(--primary); border-color: var(--primary); }
+.step-label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+.step-line { flex: 0 1 48px; height: 2px; margin: 0 -8px; margin-bottom: 22px; background: var(--border); border-radius: 2px; align-self: flex-start; }
+.step-line.done { background: var(--primary); }
 .wizard-body { min-height: 390px; max-height: calc(100vh - 260px); padding: 24px; overflow-y: auto; }
 .wizard-grid { margin-top: 0; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; }
 .wizard-grid input, .wizard-grid select { width: 100%; min-height: 42px; }
@@ -546,6 +551,8 @@ button.modal-backdrop:active:not(:disabled) { position: absolute; inset: 0; padd
   .wizard-grid { grid-template-columns: 1fr; }
   .resource-summary, .resource-grid { grid-template-columns: 1fr; }
   .wizard-body { max-height: calc(100vh - 250px); }
-  .wizard-steps button { font-size: 11px; padding: 12px 6px; }
+  .wizard-steps button { font-size: 11px; padding: 0; }
+  .step-dot { width: 22px; height: 22px; font-size: 11px; }
+  .step-line { flex: 0 1 20px; margin-bottom: 18px; }
   .object-picker { grid-template-columns: 1fr; }
 }

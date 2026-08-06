@@ -230,11 +230,12 @@
       </div>
 
       <div class="wizard-steps" aria-label="任务配置步骤">
-        {#each [[1, "基础配置"], [2, "同步对象"], [3, "运行方式"], [4, "定时与预警"], [5, "预检查"]] as item}
+        {#each [[1, "基础配置"], [2, "同步对象"], [3, "运行方式"], [4, "定时与预警"], [5, "预检查"]] as item, idx}
           <button type="button" disabled={(item[0] >= 2 && !stepOneReady) || (item[0] >= 3 && !stepTwoReady) || (item[0] >= 4 && !stepThreeReady) || (item[0] === 5 && !precheckResult)} class:active={step === item[0]} class:done={step > item[0]} on:click={() => (step = item[0])}>
-            <span>{#if step > item[0]}<Check size={14} />{:else}{item[0]}{/if}</span>
-            <span>{item[1]}</span>
+            <span class="step-dot">{#if step > item[0]}<Check size={12} />{:else}{item[0]}{/if}</span>
+            <span class="step-label">{item[1]}</span>
           </button>
+          {#if idx < 4}<span class="step-line" class:done={step > item[0]}></span>{/if}
         {/each}
       </div>
 
