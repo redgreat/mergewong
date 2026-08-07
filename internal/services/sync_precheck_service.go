@@ -59,8 +59,10 @@ func (s *SyncService) PrecheckTask(taskID uint) (*PrecheckResult, error) {
 		add("error", "连接类型", "可靠多表同步当前仅支持 MySQL → MySQL")
 		return result, nil
 	}
-	if task.ScheduleType != "manual" {
-		add("error", "执行方式", "全量初始化和 Binlog CDC 均由任务自身管理，不需要 Cron 或轮询间隔")
+	if task.SyncType == "cdc" || task.SyncType == "full_cdc" {
+		if task.ScheduleType != "manual" {
+			add("error", "执行方式", "Binlog CDC 由任务自身持续运行，不需要 Cron 或轮询间隔")
+		}
 	}
 	sourceDB, err := database.GetManager().GetConnection(task.SourceDB)
 	if err != nil {

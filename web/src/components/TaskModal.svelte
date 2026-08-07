@@ -245,6 +245,12 @@
 
   function handleSave() {
     if (!validateStep(1) || !validateStep(2) || !validateStep4()) return;
+    if (form.schedule_type === "cron") {
+      if (!nextRunResult || nextRunResult.error) {
+        errors.cron_expression = "请先计算下次调度时间并成功验证表达式";
+        return;
+      }
+    }
     onSave();
   }
 </script>
