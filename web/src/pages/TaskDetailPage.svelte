@@ -74,9 +74,39 @@
   let compareTimeTo = "";
   let timeCompareError = "";
   let showJobDetail = null;
+  let nextRunTime = "";
+  let nextRunError = "";
+  let nextRunLoading = false;
+
+  async function calculateNextRun() {
+    if (task.schedule_type === "manual") return;
+    nextRunLoading = true;
+    nextRunTime = "";
+    nextRunError = "";
+    try {
+      const result = await request("/api/sync/cron/next-run", {
+        method: "POST",
+        token,
+        body: {
+          schedule_type: task.schedule_type,
+          cron_expression: task.cron_expression || "",
+          interval_minutes: task.interval_minutes || 0
+        }
+      });
+      if (result.error) {
+        nextRunError = result.error;
+      } else {
+        nextRunTime = result.next_run;
+      }
+    } catch (err) {
+      nextRunError = err.message;
+    } finally {
+      nextRunLoading = false;
+    }
+  }
+  const jobDetailTablePageSize = 8;
   let repairActionsOpenId = null;
   let jobDetailTablePage = 1;
-  const jobDetailTablePageSize = 8;
   // 查找任务表名
   $: taskTableMap = {};
   $: { const tables = task.task_tables || []; for (const t of tables) taskTableMap[t.id] = { source: t.source_table, target: t.target_table }; }
@@ -104,6 +134,7 @@
     setMetricRange("24h", false);
     loadMetrics();
   }
+  $: if (task.schedule_type && task.schedule_type !== "manual" && token) calculateNextRun();
   function toLocalDateTimeInput(date) {
     const pad = (value) => String(value).padStart(2, "0");
     return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
@@ -520,7 +551,7 @@
   </section>
   <section class="workspace-panel detail-section"><div class="card-header"><div><h2>同步信息</h2></div></div><div class="detail-info-grid"><div><span>同步类型</span><strong>{task.sync_type === "full_cdc" ? "全量 + CDC" : task.sync_type === "cdc" ? "Binlog CDC" : "全量"}</strong></div><div><span>{task.sync_type === "full" ? "开始时间" : "当前阶段开始"}</span><strong>{task.phase_started_at ? new Date(task.phase_started_at).toLocaleString() : "-"}</strong></div><div><span>{task.sync_type === "full" ? "结束时间" : "最近成功"}</span><strong>{task.last_success_at ? new Date(task.last_success_at).toLocaleString() : "-"}</strong></div><div><span>{task.sync_type === "full" ? "总计耗时" : "花费时间"}</span><strong>{task.phase_started_at ? durationText(task.phase_started_at, task.last_success_at || new Date()) : "-"}</strong></div><div><span>预警发送群</span><strong>{task.alert_channel?.name || "未配置"}</strong></div><div><span>批大小</span><strong>{task.sync_batch_size > 0 ? task.sync_batch_size + " 行" : "默认 1000 行"}</strong></div><div><span>表并发</span><strong>{task.snapshot_table_workers > 0 ? task.snapshot_table_workers : "自动"}</strong></div><div><span>分片并发</span><strong>{task.snapshot_shard_workers > 0 ? task.snapshot_shard_workers : "自动"}</strong></div></div></section>
   {#if task.sync_type === "full"}
-  <section class="workspace-panel detail-section"><div class="card-header"><div><h2>定时任务</h2></div></div><div class="detail-info-grid"><div><span>调度方式</span><strong>{task.schedule_type === "interval" ? "按间隔" : task.schedule_type === "cron" ? "Cron 表达式" : "手动触发"}</strong></div><div><span>间隔分钟</span><strong>{task.schedule_type === "interval" && task.interval_minutes > 0 ? task.interval_minutes + " 分钟" : "-"}</strong></div><div><span>Cron 表达式</span><strong>{task.schedule_type === "cron" && task.cron_expression ? task.cron_expression : "-"}</strong></div></div></section>
+  <section class="workspace-panel detail-section"><div class="card-header"><div><h2>定时任务</h2></div></div><div class="detail-info-grid"><div><span>调度方式</span><strong>{task.schedule_type === "interval" ? "按间隔" : task.schedule_type === "cron" ? "Cron 表达式" : "手动触发"}</strong></div><div><span>间隔分钟</span><strong>{task.schedule_type === "interval" && task.interval_minutes > 0 ? task.interval_minutes + " 分钟" : "-"}</strong></div><div><span>Cron 表达式</span><strong>{task.schedule_type === "cron" && task.cron_expression ? task.cron_expression : "-"}</strong></div>{#if task.schedule_type === "cron" || task.schedule_type === "interval"}<div><span>下次运行时间</span><strong>{nextRunLoading ? "计算中..." : nextRunTime}{#if nextRunError}<span class="next-run-error">{nextRunError}</span>{/if}</strong></div>{/if}</div></section>
   {/if}
   {#if task.sync_type !== "full"}
   <section class="workspace-panel detail-section">

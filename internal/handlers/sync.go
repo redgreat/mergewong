@@ -559,7 +559,9 @@ func parseMetricTime(value string) (time.Time, error) {
 }
 
 type cronNextRunRequest struct {
-	CronExpression string `json:"cron_expression" binding:"required"`
+	ScheduleType    string `json:"schedule_type"`
+	CronExpression  string `json:"cron_expression"`
+	IntervalMinutes int    `json:"interval_minutes"`
 }
 
 func (h *SyncHandler) CronNextRun(c *gin.Context) {
@@ -568,12 +570,25 @@ func (h *SyncHandler) CronNextRun(c *gin.Context) {
 		utils.BadRequest(c, "请求参数错误: "+err.Error())
 		return
 	}
-	parser := cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow)
-	schedule, err := parser.Parse(strings.TrimSpace(req.CronExpression))
-	if err != nil {
-		utils.Success(c, gin.H{"next_run": "", "error": "Cron 表达式错误: " + err.Error()})
+	if req.ScheduleType == "cron" {
+		parser := cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow)
+		schedule, err := parser.Parse(strings.TrimSpace(req.CronExpression))
+		if err != nil {
+			utils.Success(c, gin.H{"next_run": "", "error": "Cron 表达式错误: " + err.Error()})
+			return
+		}
+		next := schedule.Next(time.Now())
+		utils.Success(c, gin.H{"next_run": next.Format("2006-01-02 15:04:05"), "error": ""})
 		return
 	}
-	next := schedule.Next(time.Now())
-	utils.Success(c, gin.H{"next_run": next.Format("2006-01-02 15:04:05"), "error": ""})
+	if req.ScheduleType == "interval" {
+		if req.IntervalMinutes < 1 {
+			utils.Success(c, gin.H{"next_run": "", "error": "间隔分钟必须大于等于 1"})
+			return
+		}
+		next := time.Now().Add(time.Duration(req.IntervalMinutes) * time.Minute)
+		utils.Success(c, gin.H{"next_run": next.Format("2006-01-02 15:04:05"), "error": ""})
+		return
+	}
+	utils.Success(c, gin.H{"next_run": "", "error": ""})
 }
