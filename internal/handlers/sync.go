@@ -160,6 +160,9 @@ type UpdateTaskRequest struct {
 	SyncBatchSize        int                `json:"sync_batch_size"`
 	SnapshotTableWorkers int                `json:"snapshot_table_workers"`
 	SnapshotShardWorkers int                `json:"snapshot_shard_workers"`
+	ScheduleType         string             `json:"schedule_type"`
+	CronExpression       string             `json:"cron_expression"`
+	IntervalMinutes      int                `json:"interval_minutes"`
 	Tables               []TaskTableRequest `json:"tables"`
 }
 
@@ -204,6 +207,9 @@ func (h *SyncHandler) UpdateTask(c *gin.Context) {
 		"sync_batch_size":        req.SyncBatchSize,
 		"snapshot_table_workers": req.SnapshotTableWorkers,
 		"snapshot_shard_workers": req.SnapshotShardWorkers,
+		"schedule_type":          req.ScheduleType,
+		"cron_expression":        strings.TrimSpace(req.CronExpression),
+		"interval_minutes":       req.IntervalMinutes,
 	}
 	if alertChannelID == nil {
 		updates["alert_channel_id"] = nil
@@ -212,6 +218,18 @@ func (h *SyncHandler) UpdateTask(c *gin.Context) {
 	}
 	if err := h.syncService.ValidateTaskExecutionConfig(req.SyncBatchSize, req.SnapshotTableWorkers, req.SnapshotShardWorkers); err != nil {
 		utils.BadRequest(c, err.Error())
+		return
+	}
+	if req.ScheduleType != "manual" && req.ScheduleType != "interval" && req.ScheduleType != "cron" {
+		utils.BadRequest(c, "不支持的调度方式")
+		return
+	}
+	if req.ScheduleType == "cron" && strings.TrimSpace(req.CronExpression) == "" {
+		utils.BadRequest(c, "Cron 表达式不能为空")
+		return
+	}
+	if req.ScheduleType == "interval" && req.IntervalMinutes < 1 {
+		utils.BadRequest(c, "执行间隔至少为 1 分钟")
 		return
 	}
 
