@@ -25,7 +25,9 @@
   let columnLoading = {};
   let columnErrors = {};
   let errors = {};
-  $: if (!open) { step = 1; helpOpen = ""; errors = {}; expandedMappingTable = ""; columnCache = {}; columnLoading = {}; columnErrors = {}; }
+  let nextRunLoading = false;
+  let nextRunResult = null;
+  $: if (!open) { step = 1; helpOpen = ""; errors = {}; expandedMappingTable = ""; columnCache = {}; columnLoading = {}; columnErrors = {}; nextRunResult = null; }
   $: if (open && precheckResult) step = 5;
   $: stepOneReady = !!(form.name?.trim() && form.source_db && form.target_db);
   $: stepTwoReady = !!form.table_mappings?.length && form.table_mappings.every((table) => table.source_table?.trim() && table.target_table?.trim());
@@ -219,6 +221,23 @@
     return Object.keys(errors).length === 0;
   }
 
+  async function calculateNextRun() {
+    if (!form.cron_expression?.trim()) {
+      nextRunResult = { error: "请先填写 Cron 表达式" };
+      return;
+    }
+    nextRunLoading = true;
+    nextRunResult = null;
+    try {
+      const result = await request("/api/sync/cron/next-run", { method: "POST", token, body: { cron_expression: form.cron_expression } });
+      nextRunResult = result;
+    } catch (error) {
+      nextRunResult = { error: error.message };
+    } finally {
+      nextRunLoading = false;
+    }
+  }
+
   function nextStep() {
     if (!validateStep(step)) return;
     step += 1;
@@ -394,6 +413,18 @@
                 <input type="text" bind:value={form.cron_expression} placeholder="例如 0 0 2 * * *（每天凌晨2点）" />
                 {#if errors.cron_expression}<span class="field-error">{errors.cron_expression}</span>{/if}
               </label>
+              <div class="next-run-bar">
+                <button type="button" class="ghost next-run-btn" disabled={nextRunLoading} on:click={calculateNextRun}>
+                  {#if nextRunLoading}计算中...{:else}计算下次调度时间{/if}
+                </button>
+                {#if nextRunResult}
+                  {#if nextRunResult.error}
+                    <span class="next-run-error">{nextRunResult.error}</span>
+                  {:else}
+                    <span class="next-run-value">下次调度：<strong>{nextRunResult.next_run}</strong></span>
+                  {/if}
+                {/if}
+              </div>
             {/if}
           </div>
 

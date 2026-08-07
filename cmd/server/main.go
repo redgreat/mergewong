@@ -215,6 +215,7 @@ func main() {
 	syncAdmin.POST("/tasks/:id/repair/compare", syncHandler.StartRepairCompare)
 	syncAdmin.POST("/tasks/:id/repair/jobs/:job_id/apply", syncHandler.StartRepairApply)
 	syncAdmin.POST("/repair/jobs/:job_id/cancel", syncHandler.CancelRepairJob)
+	syncAdmin.POST("/cron/next-run", syncHandler.CronNextRun)
 
 	alertGroup := api.Group("/alerts", middleware.AuthMiddleware())
 	alertGroup.GET("/channels", alertHandler.List)

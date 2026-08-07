@@ -10,6 +10,7 @@ import (
 	"github.com/redgreat/mergewong/internal/scheduler"
 	"github.com/redgreat/mergewong/internal/services"
 	"github.com/redgreat/mergewong/internal/utils"
+	"github.com/robfig/cron/v3"
 )
 
 // SyncHandler 同步处理器
@@ -537,4 +538,24 @@ func parseMetricTime(value string) (time.Time, error) {
 		return parsed, nil
 	}
 	return time.ParseInLocation("2006-01-02 15:04:05", value, time.Local)
+}
+
+type cronNextRunRequest struct {
+	CronExpression string `json:"cron_expression" binding:"required"`
+}
+
+func (h *SyncHandler) CronNextRun(c *gin.Context) {
+	var req cronNextRunRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		utils.BadRequest(c, "请求参数错误: "+err.Error())
+		return
+	}
+	parser := cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow)
+	schedule, err := parser.Parse(strings.TrimSpace(req.CronExpression))
+	if err != nil {
+		utils.Success(c, gin.H{"next_run": "", "error": "Cron 表达式错误: " + err.Error()})
+		return
+	}
+	next := schedule.Next(time.Now())
+	utils.Success(c, gin.H{"next_run": next.Format("2006-01-02 15:04:05"), "error": ""})
 }
