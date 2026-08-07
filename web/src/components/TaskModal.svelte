@@ -208,13 +208,24 @@
     return Object.keys(errors).length === 0;
   }
 
+  function validateStep4() {
+    errors = {};
+    if (form.schedule_type === "cron" && !form.cron_expression?.trim()) {
+      errors.cron_expression = "请填写 Cron 表达式";
+    }
+    if (form.schedule_type === "interval" && (!form.interval_minutes || form.interval_minutes < 1)) {
+      errors.interval_minutes = "间隔分钟必须大于等于 1";
+    }
+    return Object.keys(errors).length === 0;
+  }
+
   function nextStep() {
     if (!validateStep(step)) return;
     step += 1;
   }
 
   function handleSave() {
-    if (!validateStep(1) || !validateStep(2)) return;
+    if (!validateStep(1) || !validateStep(2) || !validateStep4()) return;
     onSave();
   }
 </script>
@@ -376,10 +387,12 @@
             {#if form.schedule_type === "interval"}
               <label>间隔分钟
                 <input type="number" min="1" bind:value={form.interval_minutes} />
+                {#if errors.interval_minutes}<span class="field-error">{errors.interval_minutes}</span>{/if}
               </label>
             {:else if form.schedule_type === "cron"}
               <label>Cron 表达式
                 <input type="text" bind:value={form.cron_expression} placeholder="例如 0 0 2 * * *（每天凌晨2点）" />
+                {#if errors.cron_expression}<span class="field-error">{errors.cron_expression}</span>{/if}
               </label>
             {/if}
           </div>

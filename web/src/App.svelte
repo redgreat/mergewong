@@ -522,7 +522,7 @@
         target_db: taskForm.target_db.trim(),
         target_table: taskForm.target_table.trim(),
         sync_type: taskForm.sync_type,
-	    schedule_type: "manual",
+        schedule_type: taskForm.schedule_type,
         interval_minutes: Number(taskForm.interval_minutes) || 0,
         cron_expression: taskForm.cron_expression.trim(),
         field_mapping: firstFieldMapping,
@@ -546,11 +546,11 @@
 	  payload.source_table = payload.tables[0].source_table;
 	  payload.target_table = payload.tables[0].target_table;
 
+      const isNewTask = !editingTaskId;
       if (editingTaskId) {
         const currentTask = tasks.find(t => String(t.id) === String(editingTaskId));
         const hasCheckpoint = currentTask?.cdc_checkpoint?.binlog_file;
         const tablesChanged = JSON.stringify(currentTask?.task_tables?.map(t => t.source_table + t.target_table).sort()) !== JSON.stringify(payload.tables.map(t => t.source_table + t.target_table).sort());
-        // 如果已有检查点且修改了表，需要弹窗确认重新初始化
         if (hasCheckpoint && tablesChanged && !forceReinit) {
           pendingReinitTask = { id: editingTaskId, payload };
           showReinitConfirm = true;
@@ -571,8 +571,7 @@
         editingTaskId = createdTask.id;
       }
       taskPrecheckResult = await request(`/api/sync/tasks/${editingTaskId}/precheck`, { method: "POST", token });
-      // 编辑后不自动启动任务，由用户手动触发
-      if (taskPrecheckResult.passed && !editingTaskId) {
+      if (taskPrecheckResult.passed && isNewTask) {
         setMessage("任务预检查通过并已自动开始", "info");
       } else {
         setMessage(taskPrecheckResult.passed ? "任务已保存，预检查通过，等待手动启动" : "任务已保存，但预检查存在阻断项", taskPrecheckResult.passed ? "info" : "error");
