@@ -431,6 +431,10 @@ button.modal-backdrop:active:not(:disabled) { position: absolute; inset: 0; padd
 .next-run-value { color: var(--text-secondary); font-size: 12px; }
 .next-run-value strong { color: var(--success); font-weight: 600; }
 .next-run-error { color: var(--danger); font-size: 12px; }
+.truncate-checkbox { display: flex; align-items: center; gap: 8px; margin-top: 12px; padding: 10px 12px; background: var(--surface-subtle); border: 1px solid var(--border-soft); border-radius: 8px; cursor: pointer; }
+.truncate-checkbox input { width: 16px; height: 16px; accent-color: var(--primary); }
+.truncate-checkbox span { font-size: 13px; font-weight: 500; }
+.truncate-hint { display: block; margin-top: 4px; padding-left: 2px; color: var(--text-muted); font-size: 12px; line-height: 1.5; }
 .help-wrap { position: relative; display: inline-flex; }
 .help-button { display: inline-grid; place-items: center; width: 28px; height: 28px; padding: 0; color: var(--text-muted); background: transparent; border: 0; }
 .help-button:hover:not(:disabled) { color: var(--primary); background: var(--primary-soft); }

@@ -100,6 +100,7 @@ type SyncTask struct {
 	SyncBatchSize        int                `gorm:"not null;default:0" json:"sync_batch_size"`
 	SnapshotTableWorkers int                `gorm:"not null;default:0" json:"snapshot_table_workers"`
 	SnapshotShardWorkers int                `gorm:"not null;default:0" json:"snapshot_shard_workers"`
+	TruncateBeforeSync   bool               `gorm:"not null;default:true" json:"truncate_before_sync"`
 	RowsProcessed        int64              `gorm:"not null;default:0" json:"rows_processed"`
 	RowsPerSecond        float64            `gorm:"not null;default:0" json:"rows_per_second"`
 	DelaySeconds         int64              `gorm:"not null;default:0" json:"delay_seconds"`

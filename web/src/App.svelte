@@ -94,7 +94,8 @@
     alert_delay_ms: 5000,
     sync_batch_size: 0,
     snapshot_table_workers: 0,
-    snapshot_shard_workers: 0
+    snapshot_shard_workers: 0,
+    truncate_before_sync: true
   };
 
   let logs = [];
@@ -438,7 +439,8 @@
       alert_delay_ms: 5000,
       sync_batch_size: 0,
       snapshot_table_workers: 0,
-      snapshot_shard_workers: 0
+      snapshot_shard_workers: 0,
+      truncate_before_sync: true
     };
   }
 
@@ -493,7 +495,8 @@
       alert_delay_ms: (task.alert_delay_seconds || 0) * 1000,
       sync_batch_size: task.sync_batch_size || 0,
       snapshot_table_workers: task.snapshot_table_workers || 0,
-      snapshot_shard_workers: task.snapshot_shard_workers || 0
+      snapshot_shard_workers: task.snapshot_shard_workers || 0,
+      truncate_before_sync: task.truncate_before_sync !== false
     };
   }
 
@@ -532,6 +535,7 @@
         sync_batch_size: Number(taskForm.sync_batch_size) || 0,
         snapshot_table_workers: Number(taskForm.snapshot_table_workers) || 0,
         snapshot_shard_workers: Number(taskForm.snapshot_shard_workers) || 0,
+        truncate_before_sync: Boolean(taskForm.truncate_before_sync),
         alert_on_error: true
       };
 

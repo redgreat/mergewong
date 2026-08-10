@@ -47,6 +47,7 @@ type CreateTaskRequest struct {
 	SyncBatchSize        int                `json:"sync_batch_size"`
 	SnapshotTableWorkers int                `json:"snapshot_table_workers"`
 	SnapshotShardWorkers int                `json:"snapshot_shard_workers"`
+	TruncateBeforeSync   *bool              `json:"truncate_before_sync"`
 }
 
 type TaskTableRequest struct {
@@ -91,6 +92,7 @@ func (h *SyncHandler) CreateTask(c *gin.Context) {
 		SyncBatchSize:        req.SyncBatchSize,
 		SnapshotTableWorkers: req.SnapshotTableWorkers,
 		SnapshotShardWorkers: req.SnapshotShardWorkers,
+		TruncateBeforeSync:   req.TruncateBeforeSync == nil || *req.TruncateBeforeSync,
 		Status:               1,
 		UserID:               userID.(uint),
 	}
@@ -163,6 +165,7 @@ type UpdateTaskRequest struct {
 	ScheduleType         string             `json:"schedule_type"`
 	CronExpression       string             `json:"cron_expression"`
 	IntervalMinutes      int                `json:"interval_minutes"`
+	TruncateBeforeSync   *bool              `json:"truncate_before_sync"`
 	Tables               []TaskTableRequest `json:"tables"`
 }
 
@@ -210,6 +213,9 @@ func (h *SyncHandler) UpdateTask(c *gin.Context) {
 		"schedule_type":          req.ScheduleType,
 		"cron_expression":        strings.TrimSpace(req.CronExpression),
 		"interval_minutes":       req.IntervalMinutes,
+	}
+	if req.TruncateBeforeSync != nil {
+		updates["truncate_before_sync"] = *req.TruncateBeforeSync
 	}
 	if alertChannelID == nil {
 		updates["alert_channel_id"] = nil

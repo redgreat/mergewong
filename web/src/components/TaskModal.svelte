@@ -394,6 +394,13 @@
               <small>单表分片并行数</small>
             </label>
           </div>
+          {#if form.sync_type === "full" || form.sync_type === "full_cdc"}
+          <label class="checkbox-label truncate-checkbox">
+            <input type="checkbox" bind:checked={form.truncate_before_sync} />
+            <span>全量初始化前清空目标表</span>
+          </label>
+          <small class="truncate-hint">勾选后将对未配置 WHERE 条件的目标表执行 TRUNCATE；配置了 WHERE 筛选的表会自动跳过</small>
+          {/if}
         {:else if step === 4}
           <div class="wizard-section-title">
             <h4>定时执行</h4>
