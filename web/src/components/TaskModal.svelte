@@ -229,7 +229,7 @@
     nextRunLoading = true;
     nextRunResult = null;
     try {
-      const result = await request("/api/sync/cron/next-run", { method: "POST", token, body: { cron_expression: form.cron_expression } });
+      const result = await request("/api/sync/cron/next-run", { method: "POST", token, body: { schedule_type: "cron", cron_expression: form.cron_expression } });
       nextRunResult = result;
     } catch (error) {
       nextRunResult = { error: error.message };
