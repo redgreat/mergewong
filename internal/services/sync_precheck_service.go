@@ -357,7 +357,7 @@ func mysqlGrantAllows(grants, privilege string) bool {
 }
 
 func mysqlCurrentGrants(db *gorm.DB) (string, error) {
-	rows, err := db.Raw("SHOW GRANTS FOR CURRENT_USER").Rows()
+	rows, err := db.Raw("SHOW GRANTS").Rows()
 	if err != nil {
 		return "", err
 	}
