@@ -27,6 +27,7 @@
   let errors = {};
   let nextRunLoading = false;
   let nextRunResult = null;
+  let confirmIgnoreItem = null;
   $: if (!open) { step = 1; helpOpen = ""; errors = {}; expandedMappingTable = ""; columnCache = {}; columnLoading = {}; columnErrors = {}; nextRunResult = null; }
   $: if (open && precheckResult) step = 5;
   $: stepOneReady = !!(form.name?.trim() && form.source_db && form.target_db);
@@ -172,10 +173,19 @@
   }
 
   function confirmTypeMismatch(item) {
+    confirmIgnoreItem = item;
+  }
+
+  function cancelIgnore() {
+    confirmIgnoreItem = null;
+  }
+
+  function confirmIgnore() {
+    const item = confirmIgnoreItem;
+    confirmIgnoreItem = null;
+    if (!item) return;
     const table = (form.table_mappings || []).find((mapping) => `${mapping.source_table} → ${mapping.target_table}` === item.object);
     if (!table || !item.confirm_key) return;
-    const confirmed = window.confirm(`确认忽略该校验项吗？\n\n${item.message}\n\n字段类型不一致可能导致同步写入失败、数据截断或目标数据不一致。请确认源端到目标端类型兼容后再继续。`);
-    if (!confirmed) return;
     table.type_mismatch_ignores = [...new Set([...(table.type_mismatch_ignores || []), item.confirm_key])];
     form.table_mappings = [...form.table_mappings];
     onSave();
@@ -470,6 +480,23 @@
       </div>
     </div>
   </div>
+
+  {#if confirmIgnoreItem}
+    <div class="modal-layer">
+      <button class="modal-backdrop" type="button" aria-label="关闭" on:click={cancelIgnore}></button>
+      <div class="modal confirm-modal">
+        <div class="modal-header">
+          <h3>确认忽略该校验项</h3>
+          <p class="confirm-ignore-message">{confirmIgnoreItem.message}</p>
+          <p class="confirm-ignore-warn">字段类型不一致可能导致同步写入失败、数据截断或目标数据不一致。请确认源端到目标端类型兼容后再继续。</p>
+        </div>
+        <div class="modal-actions">
+          <button class="ghost" type="button" on:click={cancelIgnore}>取消</button>
+          <button class="primary" type="button" on:click={confirmIgnore}>确认忽略</button>
+        </div>
+      </div>
+    </div>
+  {/if}
 {/if}
 
 <style>
@@ -478,5 +505,24 @@
     margin-top: 4px;
     color: var(--danger);
     font-size: 12px;
+  }
+
+  .confirm-ignore-message {
+    margin: 8px 0 0;
+    color: var(--text);
+    font-size: 13px;
+    line-height: 1.5;
+    word-break: break-all;
+  }
+
+  .confirm-ignore-warn {
+    margin: 12px 0 0;
+    padding: 10px 12px;
+    color: var(--danger);
+    background: color-mix(in srgb, var(--danger) 8%, transparent);
+    border: 1px solid color-mix(in srgb, var(--danger) 22%, transparent);
+    border-radius: 8px;
+    font-size: 12px;
+    line-height: 1.5;
   }
 </style>

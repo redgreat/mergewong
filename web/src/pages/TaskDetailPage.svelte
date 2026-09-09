@@ -74,6 +74,7 @@
   let compareTimeTo = "";
   let timeCompareError = "";
   let showJobDetail = null;
+  let progressDetail = null;
   let nextRunTime = "";
   let nextRunError = "";
   let nextRunLoading = false;
@@ -546,7 +547,7 @@
   {/if}
   <section class="workspace-panel detail-section"><div class="card-header"><div><h2>同步进度</h2></div></div>
     <table class="data-table"><thead><tr><th>源表</th><th>目标表</th><th>阶段</th><th>初始化进度</th><th>已初始化 / 总行数</th><th>说明</th></tr></thead><tbody>
-      {#each task.task_tables || [] as table}<tr><td>{table.source_table}</td><td>{table.target_table}</td><td><span class={`pill ${table.sync_state === "failed" ? "danger" : table.sync_state === "active" ? "success" : "muted"}`}>{stateText(table.sync_state)}</span></td><td><div class="progress-cell"><div class="progress-track"><span style={`width:${Math.min(100, table.progress_percent || 0)}%`}></span></div><strong>{(table.progress_percent || 0).toFixed(1)}%</strong></div></td><td>{table.snapshot_processed || 0} / {table.snapshot_total || 0}</td><td>{table.progress_message || "-"}</td></tr>{/each}
+      {#each task.task_tables || [] as table}<tr><td>{table.source_table}</td><td>{table.target_table}</td><td><span class={`pill ${table.sync_state === "failed" ? "danger" : table.sync_state === "active" ? "success" : "muted"}`}>{stateText(table.sync_state)}</span></td><td><div class="progress-cell"><div class="progress-track"><span style={`width:${Math.min(100, table.progress_percent || 0)}%`}></span></div><strong>{(table.progress_percent || 0).toFixed(1)}%</strong></div></td><td>{table.snapshot_processed || 0} / {table.snapshot_total || 0}</td><td class="progress-message-cell">{#if table.progress_message}<button type="button" class="progress-message-link" title={table.progress_message} on:click={() => { progressDetail = { source: table.source_table, target: table.target_table, message: table.progress_message }; }}>{table.progress_message}</button>{:else}-{/if}</td></tr>{/each}
     </tbody></table>
   </section>
   <section class="workspace-panel detail-section"><div class="card-header"><div><h2>同步信息</h2></div></div><div class="detail-info-grid"><div><span>同步类型</span><strong>{task.sync_type === "full_cdc" ? "全量 + CDC" : task.sync_type === "cdc" ? "Binlog CDC" : "全量"}</strong></div><div><span>{task.sync_type === "full" ? "开始时间" : "当前阶段开始"}</span><strong>{task.phase_started_at ? new Date(task.phase_started_at).toLocaleString() : "-"}</strong></div><div><span>{task.sync_type === "full" ? "结束时间" : "最近成功"}</span><strong>{task.last_success_at ? new Date(task.last_success_at).toLocaleString() : "-"}</strong></div><div><span>{task.sync_type === "full" ? "总计耗时" : "花费时间"}</span><strong>{task.phase_started_at ? durationText(task.phase_started_at, task.last_success_at || new Date()) : "-"}</strong></div><div><span>预警发送群</span><strong>{task.alert_channel?.name || "未配置"}</strong></div><div><span>批大小</span><strong>{task.sync_batch_size > 0 ? task.sync_batch_size + " 行" : "默认 1000 行"}</strong></div><div><span>表并发</span><strong>{task.snapshot_table_workers > 0 ? task.snapshot_table_workers : "自动"}</strong></div><div><span>分片并发</span><strong>{task.snapshot_shard_workers > 0 ? task.snapshot_shard_workers : "自动"}</strong></div></div></section>
@@ -758,6 +759,20 @@
         <span>{diffPage} / {diffTotalPages}</span>
         <button class="ghost" disabled={diffPage >= diffTotalPages} on:click={() => openDiffs(diffJob, diffPage + 1)}>下一页</button>
       </div>
+    </div>
+  </div>
+{/if}
+
+{#if progressDetail}
+  <div class="modal-layer">
+    <button class="modal-backdrop" aria-label="关闭" on:click={() => (progressDetail = null)}></button>
+    <div class="modal confirm-modal progress-detail-modal">
+      <div class="modal-header">
+        <div><h3>同步说明</h3><p>{progressDetail.source} → {progressDetail.target}</p></div>
+        <button class="ghost icon" on:click={() => (progressDetail = null)}><X size={17} /></button>
+      </div>
+      <div class="progress-detail-body">{progressDetail.message}</div>
+      <div class="modal-actions"><button class="primary" on:click={() => (progressDetail = null)}>关闭</button></div>
     </div>
   </div>
 {/if}
