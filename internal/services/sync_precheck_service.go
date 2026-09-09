@@ -88,7 +88,6 @@ func (s *SyncService) PrecheckTask(taskID uint) (*PrecheckResult, error) {
 	if grantErr != nil {
 		add("warning", "目标权限", "无法读取账号授权信息: "+grantErr.Error())
 	}
-	upperGrants := strings.ToUpper(grants)
 	if task.SyncType == "cdc" || task.SyncType == "full_cdc" {
 		var variable struct {
 			VariableName string `gorm:"column:Variable_name"`
@@ -130,7 +129,7 @@ func (s *SyncService) PrecheckTask(taskID uint) (*PrecheckResult, error) {
 			add("success", "Binlog 位点", "可读取当前位点")
 		}
 	}
-	if grantErr == nil && !strings.Contains(upperGrants, "ALL PRIVILEGES") && !strings.Contains(upperGrants, "INSERT") {
+	if grantErr == nil && !mysqlGrantAllows(grants, "INSERT") {
 		add("error", "目标权限", "目标账号缺少 INSERT 权限")
 	}
 
@@ -230,7 +229,7 @@ func (s *SyncService) PrecheckTask(taskID uint) (*PrecheckResult, error) {
 			}
 		}
 	}
-	if needsCreate && grantErr == nil && !strings.Contains(upperGrants, "ALL PRIVILEGES") && !strings.Contains(upperGrants, "CREATE") {
+	if needsCreate && grantErr == nil && !mysqlGrantAllows(grants, "CREATE") {
 		add("error", "目标权限", "存在待创建目标表，但目标账号缺少 CREATE 权限")
 	}
 
@@ -344,6 +343,17 @@ func confirmedTypeMismatch(mapping *models.SyncTaskTable, key string) bool {
 		}
 	}
 	return false
+}
+
+var mysqlAllGrantPattern = regexp.MustCompile(`\bALL\b`)
+
+// mysqlGrantAllows 判断授权语句是否包含指定权限，兼容 ADB 用 ALL 表示全部权限
+func mysqlGrantAllows(grants, privilege string) bool {
+	upper := strings.ToUpper(grants)
+	if mysqlAllGrantPattern.MatchString(upper) {
+		return true
+	}
+	return strings.Contains(upper, strings.ToUpper(privilege))
 }
 
 func mysqlCurrentGrants(db *gorm.DB) (string, error) {
