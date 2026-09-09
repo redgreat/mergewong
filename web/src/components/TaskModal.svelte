@@ -28,7 +28,8 @@
   let nextRunLoading = false;
   let nextRunResult = null;
   let confirmIgnoreItem = null;
-  $: if (!open) { step = 1; helpOpen = ""; errors = {}; expandedMappingTable = ""; columnCache = {}; columnLoading = {}; columnErrors = {}; nextRunResult = null; }
+  let confirmIgnoreAllOpen = false;
+  $: if (!open) { step = 1; helpOpen = ""; errors = {}; expandedMappingTable = ""; columnCache = {}; columnLoading = {}; columnErrors = {}; nextRunResult = null; confirmIgnoreAllOpen = false; }
   $: if (open && precheckResult) step = 5;
   $: stepOneReady = !!(form.name?.trim() && form.source_db && form.target_db);
   $: stepTwoReady = !!form.table_mappings?.length && form.table_mappings.every((table) => table.source_table?.trim() && table.target_table?.trim());
@@ -38,6 +39,7 @@
   $: effectiveTableWorkers = Number(form.snapshot_table_workers || 0);
   $: effectiveShardWorkers = Number(form.snapshot_shard_workers || 0);
   $: isFullSync = form.sync_type === "full";
+  $: ignorableItems = (precheckResult?.items || []).filter((item) => item.code === "type_mismatch" && item.level === "error");
   $: if (open && step === 2 && form.source_db && loadedConnection !== form.source_db) loadSourceTables();
 
   async function loadSourceTables() {
@@ -180,13 +182,29 @@
     confirmIgnoreItem = null;
   }
 
+  function applyIgnore(item) {
+    const table = (form.table_mappings || []).find((mapping) => `${mapping.source_table} → ${mapping.target_table}` === item.object);
+    if (!table || !item.confirm_key) return;
+    table.type_mismatch_ignores = [...new Set([...(table.type_mismatch_ignores || []), item.confirm_key])];
+  }
+
   function confirmIgnore() {
     const item = confirmIgnoreItem;
     confirmIgnoreItem = null;
     if (!item) return;
-    const table = (form.table_mappings || []).find((mapping) => `${mapping.source_table} → ${mapping.target_table}` === item.object);
-    if (!table || !item.confirm_key) return;
-    table.type_mismatch_ignores = [...new Set([...(table.type_mismatch_ignores || []), item.confirm_key])];
+    applyIgnore(item);
+    form.table_mappings = [...form.table_mappings];
+    onSave();
+  }
+
+  function openIgnoreAll() {
+    confirmIgnoreAllOpen = true;
+  }
+
+  function confirmIgnoreAll() {
+    const items = ignorableItems;
+    confirmIgnoreAllOpen = false;
+    for (const item of items) applyIgnore(item);
     form.table_mappings = [...form.table_mappings];
     onSave();
   }
@@ -475,6 +493,7 @@
         <button class="ghost" type="button" on:click={onClose}>取消</button>
         <div>
           {#if step > 1 && step < 5}<button class="ghost" type="button" on:click={() => (step -= 1)}>上一步</button>{/if}
+          {#if step === 5 && ignorableItems.length > 0}<button class="ghost" type="button" on:click={openIgnoreAll}>一键忽略</button>{/if}
           {#if step < 4}<button type="button" disabled={(step === 1 && !stepOneReady) || (step === 2 && !stepTwoReady) || (step === 3 && !stepThreeReady)} on:click={nextStep}>下一步</button>{:else if step === 4}<button disabled={saving} on:click={handleSave}>{saving ? "正在预检查…" : "保存并预检查"}</button>{:else}<button on:click={onClose}>完成</button>{/if}
         </div>
       </div>
@@ -493,6 +512,30 @@
         <div class="modal-actions">
           <button class="ghost" type="button" on:click={cancelIgnore}>取消</button>
           <button class="primary" type="button" on:click={confirmIgnore}>确认忽略</button>
+        </div>
+      </div>
+    </div>
+  {/if}
+
+  {#if confirmIgnoreAllOpen}
+    <div class="modal-layer">
+      <button class="modal-backdrop" type="button" aria-label="关闭" on:click={() => (confirmIgnoreAllOpen = false)}></button>
+      <div class="modal confirm-modal ignore-all-modal">
+        <div class="modal-header">
+          <h3>一键忽略校验项</h3>
+          <p class="confirm-ignore-warn">以下 {ignorableItems.length} 项字段类型不一致将被忽略，可能导致同步写入失败、数据截断或目标数据不一致。请确认后再继续。</p>
+        </div>
+        <div class="ignore-all-list">
+          {#each ignorableItems as item}
+            <div class="ignore-all-item">
+              <strong>{item.object}</strong>
+              <p>{item.message}</p>
+            </div>
+          {/each}
+        </div>
+        <div class="modal-actions">
+          <button class="ghost" type="button" on:click={() => (confirmIgnoreAllOpen = false)}>取消</button>
+          <button class="primary" type="button" on:click={confirmIgnoreAll}>确认全部忽略</button>
         </div>
       </div>
     </div>
@@ -524,5 +567,47 @@
     border-radius: 8px;
     font-size: 12px;
     line-height: 1.5;
+  }
+
+  .ignore-all-modal {
+    width: min(560px, 96vw);
+    max-height: calc(100vh - 48px);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  .ignore-all-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-top: 14px;
+    padding-right: 4px;
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+  }
+
+  .ignore-all-item {
+    padding: 10px 12px;
+    background: var(--surface-subtle);
+    border: 1px solid var(--border-soft);
+    border-radius: 8px;
+  }
+
+  .ignore-all-item strong {
+    display: block;
+    margin-bottom: 4px;
+    color: var(--text);
+    font-size: 13px;
+    word-break: break-all;
+  }
+
+  .ignore-all-item p {
+    margin: 0;
+    color: var(--text-secondary);
+    font-size: 12px;
+    line-height: 1.5;
+    word-break: break-all;
   }
 </style>
