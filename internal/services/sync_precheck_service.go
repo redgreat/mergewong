@@ -129,8 +129,12 @@ func (s *SyncService) PrecheckTask(taskID uint) (*PrecheckResult, error) {
 			add("success", "Binlog 位点", "可读取当前位点")
 		}
 	}
-	if grantErr == nil && !mysqlGrantAllows(grants, "INSERT") {
-		add("error", "目标权限", "目标账号缺少 INSERT 权限")
+	if grantErr == nil {
+		if !mysqlGrantAllows(grants, "INSERT") {
+			add("error", "目标权限", "目标账号缺少 INSERT 权限")
+		} else {
+			add("success", "目标权限", "目标账号具备写入权限")
+		}
 	}
 
 	needsCreate := false
