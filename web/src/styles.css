@@ -243,6 +243,8 @@ input:focus, select:focus, textarea:focus { border-color: var(--primary); box-sh
 .progress-message-cell { max-width: 260px; }
 .progress-message-link { display: block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-secondary); background: transparent; border: 0; padding: 0; cursor: pointer; font-size: 13px; text-align: left; }
 .progress-message-link:hover { color: var(--primary); text-decoration: underline; }
+.metric-message-link { display: block; margin-top: 7px; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-muted); background: transparent; border: 0; padding: 0; cursor: pointer; font-size: 12px; text-align: left; }
+.metric-message-link:hover { color: var(--primary); text-decoration: underline; }
 .progress-detail-modal { width: min(520px, 96vw); }
 .progress-detail-body { max-height: 50vh; overflow-y: auto; padding: 16px 18px; color: var(--text); font-size: 13px; line-height: 1.6; white-space: pre-wrap; word-break: break-word; }
 .row-actions { display: flex; align-items: center; gap: 6px; }

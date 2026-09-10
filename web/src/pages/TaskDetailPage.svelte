@@ -75,6 +75,7 @@
   let timeCompareError = "";
   let showJobDetail = null;
   let progressDetail = null;
+  let statusDetail = null;
   let nextRunTime = "";
   let nextRunError = "";
   let nextRunLoading = false;
@@ -457,7 +458,7 @@
 <section class="task-detail-page">
   <div class="detail-heading"><div><button class="ghost icon-text" on:click={onBack}><ArrowLeft size={16}/>返回任务</button><h2>{task.name}</h2><p>{task.source_db} → {task.target_db}</p></div><button class="ghost icon-text" on:click={() => refreshDetail(true)}><RefreshCw size={15}/>刷新</button></div>
   <div class="metric-grid">
-    <div class="metric-card"><span><Workflow size={16}/>运行状态</span><strong>{runtimeText(task.runtime_status)}</strong><small>{task.last_run_message || "-"}</small></div>
+    <div class="metric-card"><span><Workflow size={16}/>运行状态</span><strong>{runtimeText(task.runtime_status)}</strong>{#if task.last_run_message}<button type="button" class="metric-message-link" title={task.last_run_message} on:click={() => (statusDetail = task.last_run_message)}>{task.last_run_message}</button>{:else}<small>-</small>{/if}</div>
     <div class="metric-card"><span><Gauge size={16}/>同步速率</span><strong>{(task.rows_per_second || 0).toFixed(1)}</strong><small>行/秒</small></div>
 			<div class="metric-card"><span><Database size={16}/>全量初始化进度</span><strong>{overallPercent.toFixed(1)}%</strong><small>{snapshotProcessed} / {snapshotTotal} 行</small></div>
 		    {#if task.sync_type === "full"}
@@ -773,6 +774,20 @@
       </div>
       <div class="progress-detail-body">{progressDetail.message}</div>
       <div class="modal-actions"><button class="primary" on:click={() => (progressDetail = null)}>关闭</button></div>
+    </div>
+  </div>
+{/if}
+
+{#if statusDetail}
+  <div class="modal-layer">
+    <button class="modal-backdrop" aria-label="关闭" on:click={() => (statusDetail = null)}></button>
+    <div class="modal confirm-modal progress-detail-modal">
+      <div class="modal-header">
+        <div><h3>运行状态详情</h3><p>{runtimeText(task.runtime_status)}</p></div>
+        <button class="ghost icon" on:click={() => (statusDetail = null)}><X size={17} /></button>
+      </div>
+      <div class="progress-detail-body">{statusDetail}</div>
+      <div class="modal-actions"><button class="primary" on:click={() => (statusDetail = null)}>关闭</button></div>
     </div>
   </div>
 {/if}
