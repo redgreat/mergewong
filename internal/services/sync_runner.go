@@ -21,6 +21,7 @@ const (
 	defaultSyncBatchSize       = 5000
 	defaultSnapshotTableWorker = 4
 	defaultSnapshotShardWorker = 4
+	maxMySQLPlaceholders       = 65535
 )
 
 var taskRunLocks sync.Map
@@ -513,6 +514,23 @@ func writeMySQLBatchTx(db *gorm.DB, mapping *models.SyncTaskTable, sourceColumns
 	for i, column := range targetColumns {
 		quoted[i] = quoteMySQL(column)
 	}
+	maxRows := maxMySQLPlaceholders / len(targetColumns)
+	if maxRows < 1 {
+		maxRows = 1
+	}
+	for start := 0; start < len(batch); start += maxRows {
+		end := start + maxRows
+		if end > len(batch) {
+			end = len(batch)
+		}
+		if err := execMySQLBatch(db, mapping, sourceColumns, targetColumns, quoted, batch[start:end]); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func execMySQLBatch(db *gorm.DB, mapping *models.SyncTaskTable, sourceColumns, targetColumns, quoted []string, batch []map[string]interface{}) error {
 	placeholders, args := buildMySQLInsertValues(sourceColumns, batch)
 	expectedArgs := len(placeholders) * len(targetColumns)
 	if len(args) != expectedArgs {
