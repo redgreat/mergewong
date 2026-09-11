@@ -29,7 +29,11 @@ func (c *Connector) Connect(cfg config.DatabaseConfig) (*gorm.DB, error) {
 
 	switch cfg.Type {
 	case "mysql":
-		dsn = fmt.Sprintf("%s:%s@tcp(%s:%d)/%s?charset=%s&parseTime=True&loc=Local",
+		// interpolateParams=true 让驱动走文本协议（客户端插值）而非预处理语句（二进制协议）。
+		// AnalyticDB(ADB) 对 JSON 列在二进制协议的批量 INSERT ... ON DUPLICATE KEY UPDATE 存在缺陷，
+		// 会导致 JSON 值之后的列整体错位（如 smallint 列收到字符串）。改为文本协议后，
+		// JSON 值以转义后的字符串字面量内联，可正确写入 JSON 列。
+		dsn = fmt.Sprintf("%s:%s@tcp(%s:%d)/%s?charset=%s&parseTime=True&loc=Local&interpolateParams=true",
 			cfg.Username, cfg.Password, cfg.Host, cfg.Port, cfg.Database, cfg.Charset)
 		dialector = mysql.Open(dsn)
 
