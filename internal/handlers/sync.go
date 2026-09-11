@@ -323,6 +323,16 @@ func (h *SyncHandler) ResumeTask(c *gin.Context) {
 	utils.SuccessWithMessage(c, "任务已开始", nil)
 }
 
+func (h *SyncHandler) ResetTask(c *gin.Context) {
+	id, _ := strconv.ParseUint(c.Param("id"), 10, 32)
+	if err := h.syncService.ResetTask(uint(id)); err != nil {
+		utils.BadRequest(c, err.Error())
+		return
+	}
+	go h.syncService.ExecuteTask(uint(id))
+	utils.SuccessWithMessage(c, "任务已重置并开始执行", nil)
+}
+
 func (h *SyncHandler) UpdateCheckpoint(c *gin.Context) {
 	id, _ := strconv.ParseUint(c.Param("id"), 10, 32)
 	var req struct {

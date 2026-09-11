@@ -611,6 +611,11 @@
 	catch (error) { setMessage(error.message, "error"); }
   }
 
+  async function resetTask(task) {
+	try { await request(`/api/sync/tasks/${task.id}/reset`, { method: "POST", token }); setMessage("任务已重置并开始执行", "info"); await loadTasks(); }
+	catch (error) { setMessage(error.message, "error"); }
+  }
+
   async function updateTaskCheckpoint(task, checkpoint) {
 	try { await request(`/api/sync/tasks/${task.id}/checkpoint`, { method: "PUT", token, body: checkpoint }); setMessage("Binlog 位点已修改", "info"); await loadTasks(); }
 	catch (error) { setMessage(error.message, "error"); throw error; }
@@ -741,6 +746,7 @@
         onEdit={(t) => openTaskModal("edit", t)}
 		onPause={(t) => pauseTask(t)}
 		onResume={(t) => resumeTask(t)}
+		onReset={(t) => resetTask(t)}
         onUpdateCheckpoint={(t, checkpoint) => updateTaskCheckpoint(t, checkpoint)}
         onDelete={(t) => deleteTask(t)}
         onRefresh={loadTasks}

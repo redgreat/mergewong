@@ -211,6 +211,7 @@ func main() {
 	syncAdmin.POST("/tasks/:id/precheck", syncHandler.PrecheckTask)
 	syncAdmin.POST("/tasks/:id/pause", syncHandler.PauseTask)
 	syncAdmin.POST("/tasks/:id/resume", syncHandler.ResumeTask)
+	syncAdmin.POST("/tasks/:id/reset", syncHandler.ResetTask)
 	syncAdmin.PUT("/tasks/:id/checkpoint", syncHandler.UpdateCheckpoint)
 	syncAdmin.POST("/tasks/:id/repair/compare", syncHandler.StartRepairCompare)
 	syncAdmin.POST("/tasks/:id/repair/jobs/:job_id/apply", syncHandler.StartRepairApply)

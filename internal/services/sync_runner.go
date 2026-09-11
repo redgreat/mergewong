@@ -168,12 +168,6 @@ func (s *SyncService) syncValidatedTable(task *models.SyncTask, mapping *models.
 			return 0, err
 		}
 	}
-	if task.TruncateBeforeSync && mapping.CustomWhere == "" {
-		if err := targetDB.Exec("TRUNCATE TABLE " + quoteMySQL(mapping.TargetTable)).Error; err != nil {
-			return 0, fmt.Errorf("TRUNCATE 目标表 %s 失败: %w", mapping.TargetTable, err)
-		}
-		log.Printf("任务 %d 全量初始化前已清空目标表 %s", task.ID, mapping.TargetTable)
-	}
 	var checkpoint models.SyncCheckpoint
 	err := s.systemDB.Where("task_table_id = ?", mapping.ID).First(&checkpoint).Error
 	if err != nil && err != gorm.ErrRecordNotFound {
@@ -189,6 +183,16 @@ func (s *SyncService) syncValidatedTable(task *models.SyncTask, mapping *models.
 	var sourceTotal int64
 	if err := sourceDB.Table(mapping.SourceTable).Count(&sourceTotal).Error; err != nil {
 		return 0, err
+	}
+	var shardCount int64
+	if err := s.systemDB.Model(&models.SyncSnapshotShardCheckpoint{}).Where("task_table_id = ?", mapping.ID).Count(&shardCount).Error; err != nil {
+		return 0, err
+	}
+	if shardCount == 0 && task.TruncateBeforeSync && mapping.CustomWhere == "" {
+		if err := targetDB.Exec("TRUNCATE TABLE " + quoteMySQL(mapping.TargetTable)).Error; err != nil {
+			return 0, fmt.Errorf("TRUNCATE 目标表 %s 失败: %w", mapping.TargetTable, err)
+		}
+		log.Printf("任务 %d 全量初始化前已清空目标表 %s", task.ID, mapping.TargetTable)
 	}
 	shards, err := s.ensureSnapshotShards(task, sourceDB, mapping, sourceTotal)
 	if err != nil {

@@ -2,11 +2,12 @@
   import { CircleAlert, EllipsisVertical, RefreshCw, Workflow, X } from "lucide-svelte";
   export let tasks = [], taskPage = 1, taskPageSize = 10, taskTotal = 0, canManage = false;
 	export let onPrev = () => {}, onNext = () => {}, onOpenNew = () => {}, onEdit = () => {}, onDetail = () => {}, onDelete = () => {}, onRefresh = () => {};
-  export let onPause = () => {}, onResume = () => {}, onUpdateCheckpoint = () => {};
+  export let onPause = () => {}, onResume = () => {}, onReset = () => {}, onUpdateCheckpoint = () => {};
   let menuTaskId = null;
   let detailTask = null;
   let checkpointTask = null;
   let deleteTask = null;
+  let resetTask = null;
   let checkpoint = { file: "", position: 4 };
   let savingCheckpoint = false;
 
@@ -67,6 +68,7 @@
           <td>{#if task.sync_type === "full"}{((task.task_tables || []).reduce((s, t) => s + Number(t.snapshot_processed || 0), 0) / Math.max(1, (task.task_tables || []).reduce((s, t) => s + Number(t.snapshot_total || 0), 0)) * 100).toFixed(1)}%{:else}{delayText(task.delay_seconds)}{/if}</td><td>{speedText(task.rows_per_second)}</td><td>{task.alert_channel?.name || "-"}</td>
           {#if canManage}<td><div class="task-operation"><button class="icon-button" aria-label={`操作 ${task.name}`} on:click|stopPropagation={() => (menuTaskId = menuTaskId === task.id ? null : task.id)}><EllipsisVertical size={17} /></button>{#if menuTaskId === task.id}<div class="operation-menu">
             {#if runningStates.includes(task.runtime_status)}<button on:click={() => { menuTaskId = null; onPause(task); }}>暂停</button>{:else}<button disabled={task.validation_status !== "passed"} on:click={() => { menuTaskId = null; onResume(task); }}>开始</button>{/if}
+            {#if task.sync_type === "full"}<button disabled={runningStates.includes(task.runtime_status)} on:click={() => { menuTaskId = null; resetTask = task; }}>重置任务</button>{/if}
             <button on:click={() => { menuTaskId = null; onEdit(task); }}>修改同步对象</button>
 			<button on:click={() => { menuTaskId = null; onDetail(task); }}>详情</button>
             <button disabled={!canEditCheckpoint(task)} on:click={() => openCheckpoint(task)}>修改 Binlog 位点</button>
@@ -83,3 +85,4 @@
 {#if detailTask}<div class="modal-layer"><button class="modal-backdrop" aria-label="关闭" on:click={() => (detailTask = null)}></button><div class="modal compact-modal"><div class="modal-header"><h3>同步失败详情</h3><button class="ghost icon" on:click={() => (detailTask = null)}><X size={17} /></button></div><div class="error-detail"><strong>{detailTask.name}</strong><p>{detailTask.last_run_message || "未记录错误详情"}</p></div><div class="actions"><button on:click={() => (detailTask = null)}>关闭</button></div></div></div>{/if}
 {#if checkpointTask}<div class="modal-layer"><button class="modal-backdrop" aria-label="关闭" on:click={() => (checkpointTask = null)}></button><div class="modal compact-modal"><div class="modal-header"><h3>修改 Binlog 位点</h3><button class="ghost icon" on:click={() => (checkpointTask = null)}><X size={17} /></button></div><div class="form-grid single-column"><label>File<input bind:value={checkpoint.file} placeholder="例如：mysql-bin.000123" /></label><label>Position<input type="number" min="4" bind:value={checkpoint.position} placeholder="SHOW MASTER STATUS 中的 Position" /></label></div><div class="actions"><button disabled={savingCheckpoint || !checkpoint.file.trim()} on:click={saveCheckpoint}>{savingCheckpoint ? "保存中…" : "保存位点"}</button><button class="ghost" on:click={() => (checkpointTask = null)}>取消</button></div></div></div>{/if}
 {#if deleteTask}<div class="modal-layer"><button class="modal-backdrop" aria-label="关闭" on:click={() => (deleteTask = null)}></button><div class="modal compact-modal"><div class="modal-header"><h3>确认删除任务</h3><button class="ghost icon" on:click={() => (deleteTask = null)}><X size={17} /></button></div><p>确定删除“{deleteTask.name}”吗？任务配置会被删除，同步日志会保留。</p><div class="actions"><button class="danger" on:click={() => { const task = deleteTask; deleteTask = null; onDelete(task); }}>确认删除</button><button class="ghost" on:click={() => (deleteTask = null)}>取消</button></div></div></div>{/if}
+{#if resetTask}<div class="modal-layer"><button class="modal-backdrop" aria-label="关闭" on:click={() => (resetTask = null)}></button><div class="modal compact-modal"><div class="modal-header"><h3>确认重置任务</h3><button class="ghost icon" on:click={() => (resetTask = null)}><X size={17} /></button></div><p>重置“{resetTask.name}”会清空全量同步进度，并从第一行重新导入。确定继续吗？</p><div class="actions"><button class="danger" on:click={() => { const task = resetTask; resetTask = null; onReset(task); }}>确认重置</button><button class="ghost" on:click={() => (resetTask = null)}>取消</button></div></div></div>{/if}

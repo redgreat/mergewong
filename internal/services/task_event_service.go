@@ -118,6 +118,34 @@ func (s *SyncService) ResumeTask(taskID uint) error {
 	return s.ExecuteTask(taskID)
 }
 
+// ResetTask 重置全量同步任务，清除检查点后从头执行
+func (s *SyncService) ResetTask(taskID uint) error {
+	task, err := s.GetTask(taskID)
+	if err != nil {
+		return err
+	}
+	if task.SyncType != "full" {
+		return fmt.Errorf("只有全量同步任务支持重置")
+	}
+	if task.RuntimeStatus == "initializing" || task.RuntimeStatus == "catching_up" || task.RuntimeStatus == "cdc_running" {
+		return fmt.Errorf("任务运行中不能重置，请先暂停")
+	}
+	tableIDs := s.systemDB.Model(&models.SyncTaskTable{}).Select("id").Where("task_id = ?", task.ID)
+	if err := s.systemDB.Where("task_table_id IN (?)", tableIDs).Delete(&models.SyncCheckpoint{}).Error; err != nil {
+		return err
+	}
+	if err := s.systemDB.Where("task_table_id IN (?)", tableIDs).Delete(&models.SyncSnapshotShardCheckpoint{}).Error; err != nil {
+		return err
+	}
+	if err := s.systemDB.Model(&models.SyncTaskTable{}).Where("task_id = ?", task.ID).Updates(map[string]interface{}{
+		"sync_state": "pending", "snapshot_processed": 0, "snapshot_total": 0, "progress_percent": 0, "progress_message": "",
+	}).Error; err != nil {
+		return err
+	}
+	s.RecordTaskEvent(task, "task_reset", "control", "success", "任务已重置，将从头发起全量同步", "", 0, 0)
+	return nil
+}
+
 func (s *SyncService) UpdateBinlogPosition(taskID uint, file string, position uint32) error {
 	task, err := s.GetTask(taskID)
 	if err != nil {

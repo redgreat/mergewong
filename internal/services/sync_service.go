@@ -353,12 +353,6 @@ func (s *SyncService) ExecuteTask(taskID uint) error {
 		return err
 	}
 
-	// 全量任务重复执行前重置检查点
-	if task.SyncType == "full" {
-		_ = s.systemDB.Where("task_table_id IN (?)", s.systemDB.Model(&models.SyncTaskTable{}).Select("id").Where("task_id = ?", task.ID)).Delete(&models.SyncCheckpoint{}).Error
-		_ = s.systemDB.Where("task_table_id IN (?)", s.systemDB.Model(&models.SyncTaskTable{}).Select("id").Where("task_id = ?", task.ID)).Delete(&models.SyncSnapshotShardCheckpoint{}).Error
-	}
-
 	// 更新任务状态为运行中
 	now := time.Now()
 	s.UpdateTask(taskID, map[string]interface{}{
