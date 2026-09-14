@@ -35,8 +35,8 @@
     if (onFilter) onFilter();
   }
 
-	const eventLabel = (value) => ({ task_created: "新增任务", task_updated: "修改任务", task_deleted: "删除任务", precheck: "预检查", snapshot_started: "全量开始", snapshot_completed: "全量完成", cdc_started: "增量开始", cdc_failed: "增量报错", task_paused: "暂停任务", task_resumed: "开始任务", task_reset: "重置任务", checkpoint_changed: "修改位点", alert_sent: "发送预警" }[value] || value || "运行事件");
-	const statusLabel = (value) => ({ success: "成功", failed: "失败", running: "进行中", warning: "预警" }[value] || value);
+	const eventLabel = (value) => ({ task_created: "新增任务", task_updated: "修改任务", task_deleted: "删除任务", precheck: "预检查", snapshot_started: "全量开始", snapshot_completed: "全量完成", snapshot_round_started: "新一轮全量", table_snapshot_completed: "表全量完成", schedule_skipped: "调度跳过", cdc_started: "增量开始", cdc_failed: "增量报错", task_paused: "暂停任务", task_resumed: "开始任务", task_reset: "重置任务", checkpoint_changed: "修改位点", alert_sent: "发送预警" }[value] || value || "运行事件");
+	const statusLabel = (value) => ({ success: "成功", failed: "失败", running: "进行中", warning: "预警", skipped: "已跳过" }[value] || value);
   export let tasks = [];
   export let logTaskId = "";
   export let logs = [];

@@ -26,6 +26,8 @@ const (
 
 var taskRunLocks sync.Map
 var ErrTaskPaused = errors.New("任务已暂停")
+var ErrTaskAlreadyRunning = errors.New("同一任务正在执行，不能重叠运行")
+var ErrTaskPausedByUser = errors.New("任务处于暂停状态，跳过本次定时调度")
 var mysqlColumnNameCache sync.Map
 
 func snapshotBatchSize(task *models.SyncTask) int {
@@ -109,9 +111,60 @@ func acquireTaskRunLock(taskID uint) (func(), error) {
 	value, _ := taskRunLocks.LoadOrStore(taskID, &sync.Mutex{})
 	lock := value.(*sync.Mutex)
 	if !lock.TryLock() {
-		return nil, fmt.Errorf("同一任务正在执行，不能重叠运行")
+		return nil, ErrTaskAlreadyRunning
 	}
 	return lock.Unlock, nil
+}
+
+// isFullSnapshotTask 判断任务是否为按轮次重复执行的全量任务。
+func isFullSnapshotTask(task *models.SyncTask) bool {
+	return task.SyncType == "full" && len(task.TaskTables) > 0
+}
+
+// beginFullSnapshotRound 判定本次全量执行是"续跑"还是"新一轮"。
+//
+// 上一轮所有表都已跑完（每张表都有 completed 检查点）时，视为新一轮：清空快照断点后
+// 从第一行重新同步，这样定时任务每天都会重新同步一遍，而不是因为检查点已存在直接跳过。
+// 只要还有表没跑完，就保持断点续跑，避免暂停/中断恢复时把已经同步完的表再清空重来。
+func (s *SyncService) beginFullSnapshotRound(task *models.SyncTask) (bool, error) {
+	if !isFullSnapshotTask(task) {
+		return false, nil
+	}
+	tableIDs := make([]uint, 0, len(task.TaskTables))
+	for i := range task.TaskTables {
+		tableIDs = append(tableIDs, task.TaskTables[i].ID)
+	}
+	var completed int64
+	if err := s.systemDB.Model(&models.SyncCheckpoint{}).
+		Where("task_table_id IN ? AND completed = ?", tableIDs, true).
+		Count(&completed).Error; err != nil {
+		return false, err
+	}
+	if completed < int64(len(tableIDs)) {
+		return false, nil
+	}
+	if err := s.clearSnapshotState(tableIDs); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+// clearSnapshotState 清空指定表的全量断点（检查点与分片检查点），并重置表进度展示。
+func (s *SyncService) clearSnapshotState(tableIDs []uint) error {
+	if len(tableIDs) == 0 {
+		return nil
+	}
+	return s.systemDB.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Where("task_table_id IN ?", tableIDs).Delete(&models.SyncCheckpoint{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("task_table_id IN ?", tableIDs).Delete(&models.SyncSnapshotShardCheckpoint{}).Error; err != nil {
+			return err
+		}
+		return tx.Model(&models.SyncTaskTable{}).Where("id IN ?", tableIDs).Updates(map[string]interface{}{
+			"sync_state": "pending", "snapshot_total": 0, "snapshot_processed": 0, "progress_percent": 0, "progress_message": "",
+		}).Error
+	})
 }
 
 func (s *SyncService) syncValidatedTask(task *models.SyncTask) (int64, error) {

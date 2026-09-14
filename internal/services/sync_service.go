@@ -327,6 +327,63 @@ func (s *SyncService) ListTasks(page, pageSize int) ([]models.SyncTask, int64, e
 	return tasks, total, nil
 }
 
+// scheduledRunAction 描述一次定时调度对任务的处理方式。
+type scheduledRunAction int
+
+const (
+	scheduledRunExecute        scheduledRunAction = iota // 正常执行
+	scheduledRunSkipPaused                               // 任务被用户暂停，跳过
+	scheduledRunSkipIrrelevant                           // 任务不参与定时调度（CDC 或已禁用）
+)
+
+// classifyScheduledRun 判断定时调度应当执行还是跳过（纯函数，便于测试）。
+func classifyScheduledRun(task *models.SyncTask) scheduledRunAction {
+	if task == nil {
+		return scheduledRunSkipIrrelevant
+	}
+	// CDC / 全量+CDC 任务由常驻 Binlog 链路负责，调度配置被强制为 manual
+	if task.SyncType == "cdc" || task.SyncType == "full_cdc" {
+		return scheduledRunSkipIrrelevant
+	}
+	if task.Status == 0 {
+		return scheduledRunSkipIrrelevant
+	}
+	// 用户手动暂停的任务不自动拉起，等待界面上点击"开始"
+	if task.RuntimeStatus == "paused" {
+		return scheduledRunSkipPaused
+	}
+	return scheduledRunExecute
+}
+
+// ExecuteScheduledTask 定时调度入口，与手动执行 ExecuteTask 的区别：
+//  1. 任务被暂停时不自动拉起，避免"暂停"在第二天被调度悄悄恢复；
+//  2. 上一次执行还没结束时直接跳过本次调度（由任务级运行锁拦截），
+//     不会并发跑第二轮去重复清空目标表或写同一份断点。
+//
+// 手动执行、界面"开始"和"重置"仍然走 ExecuteTask，行为不变。
+func (s *SyncService) ExecuteScheduledTask(taskID uint) error {
+	task, err := s.GetTask(taskID)
+	if err != nil {
+		return err
+	}
+	switch classifyScheduledRun(task) {
+	case scheduledRunSkipIrrelevant:
+		return nil
+	case scheduledRunSkipPaused:
+		return ErrTaskPausedByUser
+	}
+	return s.ExecuteTask(taskID)
+}
+
+// RecordScheduleSkipped 记录一次被跳过的定时调度，便于在任务日志中排查。
+func (s *SyncService) RecordScheduleSkipped(taskID uint, reason string) {
+	task, err := s.GetTask(taskID)
+	if err != nil {
+		return
+	}
+	s.RecordTaskEvent(task, "schedule_skipped", "schedule", "skipped", "定时调度已跳过", reason, 0, 0)
+}
+
 // ExecuteTask 执行同步任务
 func (s *SyncService) ExecuteTask(taskID uint) error {
 	task, err := s.GetTask(taskID)
@@ -353,15 +410,36 @@ func (s *SyncService) ExecuteTask(taskID uint) error {
 		return err
 	}
 
+	// 全量任务：上一轮已全部跑完时开启新一轮，清空快照断点后重新同步，
+	// 保证定时任务每天都会重新做一遍全量，而不是因检查点已完成直接跳过。
+	newRound, err := s.beginFullSnapshotRound(task)
+	if err != nil {
+		return err
+	}
+
 	// 更新任务状态为运行中
 	now := time.Now()
-	s.UpdateTask(taskID, map[string]interface{}{
+	runUpdates := map[string]interface{}{
 		"last_run_at":      &now,
 		"last_run_status":  "running",
 		"runtime_status":   "initializing",
 		"phase_started_at": &now,
-	})
+	}
+	if newRound {
+		runUpdates["rows_processed"] = 0
+		runUpdates["rows_per_second"] = 0
+		runUpdates["delay_seconds"] = 0
+	}
+	s.UpdateTask(taskID, runUpdates)
 	s.RecordTaskEvent(task, "snapshot_started", "snapshot", "running", "全量数据初始化开始", "", 0, 0)
+	if newRound {
+		message, detail := "新一轮全量同步开始", "上一轮已全部完成，已清空快照断点，将从第一行重新同步"
+		if !task.TruncateBeforeSync {
+			message = "新一轮全量同步开始（未清空目标表）"
+			detail = "未开启 truncate_before_sync：本轮按主键 upsert 覆盖，源端已删除的行不会从目标表移除；如需与源端完全一致，请开启该选项或使用数据修复"
+		}
+		s.RecordTaskEvent(task, "snapshot_round_started", "snapshot", "running", message, detail, 0, 0)
+	}
 
 	// 创建同步日志
 	log := &models.SyncLog{

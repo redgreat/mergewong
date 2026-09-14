@@ -2,6 +2,7 @@ package scheduler
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"sync"
@@ -117,10 +118,17 @@ func (s *Scheduler) AddTask(task *models.SyncTask) error {
 	}
 	entryID, err := s.cron.AddFunc(spec, func() {
 		log.Printf("执行定时同步任务 [ID: %d]", taskID)
-		if err := s.syncService.ExecuteTask(taskID); err != nil {
-			log.Printf("定时同步任务执行失败 [ID: %d]: %v", taskID, err)
-		} else {
+		switch err := s.syncService.ExecuteScheduledTask(taskID); {
+		case err == nil:
 			log.Printf("定时同步任务执行成功 [ID: %d]", taskID)
+		case errors.Is(err, services.ErrTaskAlreadyRunning):
+			log.Printf("定时同步任务跳过 [ID: %d]: 上一次执行尚未结束", taskID)
+			s.syncService.RecordScheduleSkipped(taskID, "上一次执行尚未结束，本次调度已跳过；若长期出现说明单轮同步耗时已超过调度周期")
+		case errors.Is(err, services.ErrTaskPausedByUser):
+			log.Printf("定时同步任务跳过 [ID: %d]: 任务处于暂停状态，等待手动开始", taskID)
+			s.syncService.RecordScheduleSkipped(taskID, "任务处于暂停状态，本次调度已跳过；在界面点击“开始”后才会继续同步")
+		default:
+			log.Printf("定时同步任务执行失败 [ID: %d]: %v", taskID, err)
 		}
 	})
 
