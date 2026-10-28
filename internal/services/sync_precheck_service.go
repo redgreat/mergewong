@@ -153,6 +153,9 @@ func (s *SyncService) PrecheckTask(taskID uint) (*PrecheckResult, error) {
 			add("error", object, "读取源表结构失败: "+err.Error())
 			continue
 		}
+		// 只有整次预检查通过后才落库。日常同步始终使用这份白名单，
+		// 源表后续新增字段不会自动进入现有任务。
+		mapping.SourceColumns = mysqlColumnFieldNames(sourceColumns)
 		permissionRows, permissionErr := sourceDB.Raw("SELECT * FROM `" + mapping.SourceTable + "` LIMIT 0").Rows()
 		if permissionErr != nil {
 			add("error", object, "源账号缺少读取权限: "+permissionErr.Error())
@@ -246,7 +249,7 @@ func (s *SyncService) PrecheckTask(taskID uint) (*PrecheckResult, error) {
 					if err := tx.Create(m).Error; err != nil {
 						return err
 					}
-				} else if err := tx.Model(&models.SyncTaskTable{}).Where("id = ?", m.ID).Updates(map[string]interface{}{"source_primary_key": m.SourcePrimaryKey, "target_primary_key": m.TargetPrimaryKey, "ignored_fields": m.IgnoredFields, "type_mismatch_ignores": m.TypeMismatchIgnores}).Error; err != nil {
+				} else if err := tx.Model(&models.SyncTaskTable{}).Where("id = ?", m.ID).Updates(map[string]interface{}{"source_primary_key": m.SourcePrimaryKey, "target_primary_key": m.TargetPrimaryKey, "source_columns": m.SourceColumns, "ignored_fields": m.IgnoredFields, "type_mismatch_ignores": m.TypeMismatchIgnores}).Error; err != nil {
 					return err
 				}
 			}
@@ -279,6 +282,14 @@ func describeMySQLTable(db *gorm.DB, table string) ([]mysqlColumn, error) {
 		return nil, fmt.Errorf("表不存在")
 	}
 	return columns, nil
+}
+
+func mysqlColumnFieldNames(columns []mysqlColumn) models.StringList {
+	names := make(models.StringList, 0, len(columns))
+	for _, column := range columns {
+		names = append(names, column.Field)
+	}
+	return names
 }
 
 func primaryKeyOf(columns []mysqlColumn) string {

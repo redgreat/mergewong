@@ -221,6 +221,9 @@ func (s *SyncService) syncValidatedTable(task *models.SyncTask, mapping *models.
 			return 0, err
 		}
 	}
+	if err := s.ensureFrozenSourceColumns(mapping, sourceDB); err != nil {
+		return 0, err
+	}
 	var checkpoint models.SyncCheckpoint
 	err := s.systemDB.Where("task_table_id = ?", mapping.ID).First(&checkpoint).Error
 	if err != nil && err != gorm.ErrRecordNotFound {
@@ -232,6 +235,9 @@ func (s *SyncService) syncValidatedTable(task *models.SyncTask, mapping *models.
 	if checkpoint.Completed {
 		return 0, nil
 	}
+	// 目标表可能在任务两次运行之间通过 ALTER TABLE 增删字段。
+	// 字段缓存只在单次表同步内复用；开始续跑/新跑前必须失效，避免一直使用旧结构。
+	invalidateMySQLColumnNameCache(targetDB, mapping.TargetTable)
 	checkpoint.TaskTableID = mapping.ID
 	var sourceTotal int64
 	if err := sourceDB.Table(mapping.SourceTable).Count(&sourceTotal).Error; err != nil {
@@ -669,11 +675,14 @@ func writeMySQLRowWithSetSyntax(db *gorm.DB, mapping *models.SyncTaskTable, sour
 }
 
 func selectableSourceColumns(task *models.SyncTask, mapping *models.SyncTaskTable, db *gorm.DB) ([]string, error) {
-	columns, err := mysqlColumnNamesFromDB(db, mapping.SourceTable)
+	liveColumns, err := mysqlColumnNamesFromDB(db, mapping.SourceTable)
 	if err != nil {
 		return nil, err
 	}
-	columns = syncSourceColumns(mapping, columns)
+	columns, err := frozenSourceColumns(mapping, liveColumns)
+	if err != nil {
+		return nil, err
+	}
 	hasPK := false
 	for _, column := range columns {
 		if column == mapping.SourcePrimaryKey {
@@ -699,6 +708,49 @@ func selectableSourceColumns(task *models.SyncTask, mapping *models.SyncTaskTabl
 	return columns, nil
 }
 
+func (s *SyncService) ensureFrozenSourceColumns(mapping *models.SyncTaskTable, sourceDB *gorm.DB) error {
+	if len(mapping.SourceColumns) > 0 {
+		return nil
+	}
+	columns, err := mysqlColumnNamesFromDB(sourceDB, mapping.SourceTable)
+	if err != nil {
+		return fmt.Errorf("读取源表字段失败: %w", err)
+	}
+	mapping.SourceColumns = models.StringList(columns)
+	if mapping.ID == 0 {
+		return nil
+	}
+	if err := s.systemDB.Model(&models.SyncTaskTable{}).Where("id = ?", mapping.ID).Update("source_columns", mapping.SourceColumns).Error; err != nil {
+		return fmt.Errorf("保存源字段白名单失败: %w", err)
+	}
+	return nil
+}
+
+func frozenSourceColumns(mapping *models.SyncTaskTable, liveColumns []string) ([]string, error) {
+	if len(mapping.SourceColumns) == 0 {
+		return syncSourceColumns(mapping, liveColumns), nil
+	}
+	liveSet := make(map[string]bool, len(liveColumns))
+	for _, column := range liveColumns {
+		liveSet[column] = true
+	}
+	ignored := make(map[string]bool, len(mapping.IgnoredFields))
+	for _, column := range mapping.IgnoredFields {
+		ignored[column] = true
+	}
+	columns := make([]string, 0, len(mapping.SourceColumns))
+	for _, column := range mapping.SourceColumns {
+		if ignored[column] {
+			continue
+		}
+		if !liveSet[column] {
+			return nil, fmt.Errorf("源表缺少任务已保存字段 %s，请重新保存并预检查任务", column)
+		}
+		columns = append(columns, column)
+	}
+	return columns, nil
+}
+
 type syncColumnPair struct {
 	source string
 	target string
@@ -709,6 +761,32 @@ func syncColumnPairs(db *gorm.DB, mapping *models.SyncTaskTable, sourceColumns [
 	if err != nil {
 		return nil, fmt.Errorf("读取目标表字段失败: %w", err)
 	}
+	pairs, missingTarget, missingSource, err := matchSyncColumnPairs(mapping, sourceColumns, targetColumns)
+	if err != nil {
+		return nil, err
+	}
+	if missingTarget == "" {
+		return pairs, nil
+	}
+
+	// 外部 ALTER TABLE 不会通知当前进程。命中“目标字段缺失”时强制回源刷新一次，
+	// 既能立即识别新增字段，也保留同一张表后续批次复用缓存的性能收益。
+	invalidateMySQLColumnNameCache(db, mapping.TargetTable)
+	targetColumns, err = cachedMySQLColumnNames(db, mapping.TargetTable)
+	if err != nil {
+		return nil, fmt.Errorf("刷新目标表字段失败: %w", err)
+	}
+	pairs, missingTarget, missingSource, err = matchSyncColumnPairs(mapping, sourceColumns, targetColumns)
+	if err != nil {
+		return nil, err
+	}
+	if missingTarget != "" {
+		return nil, fmt.Errorf("目标表缺少字段 %s（源字段 %s）", missingTarget, missingSource)
+	}
+	return pairs, nil
+}
+
+func matchSyncColumnPairs(mapping *models.SyncTaskTable, sourceColumns, targetColumns []string) ([]syncColumnPair, string, string, error) {
 	targetSet := map[string]bool{}
 	for _, column := range targetColumns {
 		targetSet[column] = true
@@ -718,25 +796,19 @@ func syncColumnPairs(db *gorm.DB, mapping *models.SyncTaskTable, sourceColumns [
 	for _, source := range syncSourceColumns(mapping, sourceColumns) {
 		target := mappedColumn(mapping.FieldMapping, source)
 		if !targetSet[target] {
-			return nil, fmt.Errorf("目标表缺少字段 %s（源字段 %s）", target, source)
+			return nil, target, source, nil
 		}
 		if previous, ok := seenTargets[target]; ok && previous != source {
-			return nil, fmt.Errorf("多个源字段写入同一目标字段 %s: %s, %s", target, previous, source)
+			return nil, "", "", fmt.Errorf("多个源字段写入同一目标字段 %s: %s, %s", target, previous, source)
 		}
 		seenTargets[target] = source
 		pairs = append(pairs, syncColumnPair{source: source, target: target})
 	}
-	return pairs, nil
+	return pairs, "", "", nil
 }
 
 func cachedMySQLColumnNames(db *gorm.DB, table string) ([]string, error) {
-	// 缓存 key 用数据库 DSN + 表名，不用 %p 指针（事务创建的 ConnPool 每次不同导致缓存失效）
-	key := ""
-	if sqlDB, err := db.DB(); err == nil {
-		key = fmt.Sprintf("%p:%s", sqlDB, table)
-	} else {
-		key = table
-	}
+	key := mysqlColumnNameCacheKey(db, table)
 	if cached, ok := mysqlColumnNameCache.Load(key); ok {
 		return cached.([]string), nil
 	}
@@ -748,14 +820,30 @@ func cachedMySQLColumnNames(db *gorm.DB, table string) ([]string, error) {
 	return columns, nil
 }
 
+func invalidateMySQLColumnNameCache(db *gorm.DB, table string) {
+	mysqlColumnNameCache.Delete(mysqlColumnNameCacheKey(db, table))
+}
+
+func mysqlColumnNameCacheKey(db *gorm.DB, table string) string {
+	// 缓存 key 用底层连接池 + 表名；事务中的 *gorm.DB 仍复用同一 *sql.DB。
+	if sqlDB, err := db.DB(); err == nil {
+		return fmt.Sprintf("%p:%s", sqlDB, table)
+	}
+	return table
+}
+
 func syncSourceColumns(mapping *models.SyncTaskTable, sourceColumns []string) []string {
 	filtered := make([]string, 0, len(sourceColumns))
 	ignored := map[string]bool{}
 	for _, field := range mapping.IgnoredFields {
 		ignored[field] = true
 	}
+	allowed := map[string]bool{}
+	for _, field := range mapping.SourceColumns {
+		allowed[field] = true
+	}
 	for _, column := range sourceColumns {
-		if !ignored[column] {
+		if !ignored[column] && (len(allowed) == 0 || allowed[column]) {
 			filtered = append(filtered, column)
 		}
 	}

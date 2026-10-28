@@ -26,6 +26,8 @@ MergeWong 的目标不是复刻 DataX、Flink CDC 或 Debezium，而是提供一
 
 `full_cdc` 先持久化当前 Binlog file/position，再按主键分页进行全量 upsert；快照完成后从已记录位点持续消费 insert/update/delete。CDC 行事件按源事务缓存并在目标端同一事务提交，提交成功后才推进系统库位点。
 
+任务每次成功预检查时把当时的源表字段保存为表级白名单。全量与 CDC 写入只使用该白名单；源表后来新增的字段不会打断已有任务，也不会自动写入目标表。用户再次保存并执行预检查时才刷新白名单，并在新字段尚未落到目标表时给出阻断错误。CDC 仍按源表当前完整物理列解码 ROW 事件，再过滤为任务白名单，避免新增列造成列数变化后误写。
+
 ### 参考项目 manualrepl
 
 `D:\github\manualrepl` 使用 Python `mysql-replication` 持续读取 MySQL binlog，将行事件区分为新增、更新、删除，再通过表专用 Processor 写入目标宽表。它值得复用的是事件模型和业务转换思路，不建议直接把其代码并入本项目：它没有持久化 binlog 位点、通用任务模型、重连/重试与管理面，且转换逻辑与具体供应商表强耦合。

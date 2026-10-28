@@ -133,6 +133,15 @@ func (m *CDCManager) StartTask(taskID uint) error {
 	if task.SyncType != "cdc" && task.SyncType != "full_cdc" {
 		return fmt.Errorf("该任务不是 Binlog CDC 任务")
 	}
+	sourceDB, err := database.GetManager().GetConnection(task.SourceDB)
+	if err != nil {
+		return err
+	}
+	for i := range task.TaskTables {
+		if err := m.service.ensureFrozenSourceColumns(&task.TaskTables[i], sourceDB); err != nil {
+			return fmt.Errorf("冻结表 %s 源字段失败: %w", task.TaskTables[i].SourceTable, err)
+		}
+	}
 	m.StopTask(taskID)
 	// 启动前检查 binlog 位点是否仍然有效，无效则自动重置
 	checkpoint := task.CDCCheckpoint
@@ -461,16 +470,9 @@ func (m *CDCManager) stream(ctx context.Context, task *models.SyncTask, source *
 			if mapping == nil {
 				continue
 			}
-			columns := columnCache[mapping.SourceTable]
-			if len(columns) == 0 {
-				columns, err = mysqlColumnNames(task.SourceDB, mapping.SourceTable)
-				if err != nil {
-					return err
-				}
-				columnCache[mapping.SourceTable] = columns
-			}
-			if int(e.ColumnCount) != len(columns) {
-				return fmt.Errorf("表 %s Binlog 列数与当前表结构不一致", mapping.SourceTable)
+			columns, err := mysqlBinlogEventColumns(task.SourceDB, mapping.SourceTable, int(e.ColumnCount), columnCache)
+			if err != nil {
+				return err
 			}
 			switch event.Header.EventType {
 			case replication.WRITE_ROWS_EVENTv1, replication.WRITE_ROWS_EVENTv2:
@@ -737,6 +739,24 @@ func mysqlColumnNames(connectionName, table string) ([]string, error) {
 		return nil, err
 	}
 	return mysqlColumnNamesFromDB(db, table)
+}
+
+func mysqlBinlogEventColumns(connectionName, table string, columnCount int, cache map[string][]string) ([]string, error) {
+	columns := cache[table]
+	if len(columns) == columnCount {
+		return columns, nil
+	}
+	// ROW 事件的值仍按源表当前物理列顺序排列。源表执行 DDL 后列数变化时，
+	// 刷新这份解码清单；后续写入会再按任务冻结的 SourceColumns 过滤新增字段。
+	refreshed, err := mysqlColumnNames(connectionName, table)
+	if err != nil {
+		return nil, err
+	}
+	if len(refreshed) != columnCount {
+		return nil, fmt.Errorf("表 %s Binlog 列数 %d 与当前表结构列数 %d 不一致", table, columnCount, len(refreshed))
+	}
+	cache[table] = refreshed
+	return refreshed, nil
 }
 
 func mysqlColumnNamesFromDB(db *gorm.DB, table string) ([]string, error) {

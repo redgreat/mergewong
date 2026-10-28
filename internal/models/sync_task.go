@@ -126,6 +126,7 @@ type SyncTaskTable struct {
 	IncrementalKey      string       `gorm:"size:100" json:"incremental_key"`
 	FieldMapping        FieldMapping `gorm:"type:json" json:"field_mapping"`
 	IgnoredFields       StringList   `gorm:"type:json" json:"ignored_fields"`
+	SourceColumns       StringList   `gorm:"type:json" json:"source_columns"` // 最近一次成功预检查时冻结的源字段白名单
 	TypeMismatchIgnores StringList   `gorm:"type:json" json:"type_mismatch_ignores"`
 	CustomWhere         string       `gorm:"type:text" json:"custom_where,omitempty"`
 	Position            int          `gorm:"not null;default:0" json:"position"`

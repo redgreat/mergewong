@@ -48,3 +48,77 @@ func TestClassifyScheduledRun(t *testing.T) {
 		})
 	}
 }
+
+func TestMatchSyncColumnPairs(t *testing.T) {
+	mapping := &models.SyncTaskTable{
+		FieldMapping: models.FieldMapping{"SourceName": "TargetName"},
+		IgnoredFields: models.StringList{"IgnoredField"},
+	}
+
+	pairs, missingTarget, missingSource, err := matchSyncColumnPairs(
+		mapping,
+		[]string{"Id", "SourceName", "IgnoredField", "LatestTicketUnpauseTime"},
+		[]string{"Id", "TargetName", "LatestTicketUnpauseTime"},
+	)
+	if err != nil {
+		t.Fatalf("matchSyncColumnPairs returned error: %v", err)
+	}
+	if missingTarget != "" || missingSource != "" {
+		t.Fatalf("unexpected missing column: target=%q source=%q", missingTarget, missingSource)
+	}
+	if len(pairs) != 3 {
+		t.Fatalf("pair count = %d, want 3", len(pairs))
+	}
+	if pairs[1].source != "SourceName" || pairs[1].target != "TargetName" {
+		t.Fatalf("field mapping was not applied: %+v", pairs[1])
+	}
+}
+
+func TestMatchSyncColumnPairsReportsMissingTarget(t *testing.T) {
+	mapping := &models.SyncTaskTable{}
+	_, missingTarget, missingSource, err := matchSyncColumnPairs(
+		mapping,
+		[]string{"Id", "LatestTicketUnpauseTime"},
+		[]string{"Id"},
+	)
+	if err != nil {
+		t.Fatalf("matchSyncColumnPairs returned error: %v", err)
+	}
+	if missingTarget != "LatestTicketUnpauseTime" || missingSource != "LatestTicketUnpauseTime" {
+		t.Fatalf("missing target/source = %q/%q", missingTarget, missingSource)
+	}
+}
+
+func TestSyncSourceColumnsUsesFrozenWhitelist(t *testing.T) {
+	mapping := &models.SyncTaskTable{
+		SourceColumns: models.StringList{"Id", "SavedField"},
+	}
+	got := syncSourceColumns(mapping, []string{"Id", "SavedField", "NewField"})
+	if len(got) != 2 || got[0] != "Id" || got[1] != "SavedField" {
+		t.Fatalf("syncSourceColumns = %#v, want saved whitelist only", got)
+	}
+}
+
+func TestFrozenSourceColumnsRejectsRemovedSavedField(t *testing.T) {
+	mapping := &models.SyncTaskTable{
+		SourceColumns: models.StringList{"Id", "RemovedField"},
+	}
+	_, err := frozenSourceColumns(mapping, []string{"Id", "NewField"})
+	if err == nil {
+		t.Fatal("frozenSourceColumns should reject a removed saved field")
+	}
+}
+
+func TestFrozenSourceColumnsAllowsIgnoredSavedFieldToDisappear(t *testing.T) {
+	mapping := &models.SyncTaskTable{
+		SourceColumns: models.StringList{"Id", "IgnoredField"},
+		IgnoredFields: models.StringList{"IgnoredField"},
+	}
+	got, err := frozenSourceColumns(mapping, []string{"Id", "NewField"})
+	if err != nil {
+		t.Fatalf("frozenSourceColumns returned error: %v", err)
+	}
+	if len(got) != 1 || got[0] != "Id" {
+		t.Fatalf("frozenSourceColumns = %#v, want Id only", got)
+	}
+}

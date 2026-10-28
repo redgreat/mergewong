@@ -45,3 +45,6 @@ configs/config.yaml
 web/node_modules
 web/dist
 tmp/
+.codebuddy/
+.dbg/
+.mimocode/

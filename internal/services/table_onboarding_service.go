@@ -65,6 +65,7 @@ func (s *SyncService) AddTaskTablesOnline(taskID uint, requested []models.SyncTa
 		}
 		table.TaskID, table.Position = taskID, len(task.TaskTables)+len(added)
 		table.SourcePrimaryKey, table.TargetPrimaryKey = pk, mappedColumn(table.FieldMapping, pk)
+		table.SourceColumns = mysqlColumnFieldNames(columns)
 		table.SyncState, table.OnboardingFile, table.OnboardingPosition = "initializing", file, pos
 		table.ProgressMessage = "等待独立初始化链路启动"
 		added = append(added, table)
@@ -205,13 +206,9 @@ func (s *SyncService) catchupTables(task *models.SyncTask, tables []models.SyncT
 			if mapping == nil {
 				continue
 			}
-			cols := columns[mapping.SourceTable]
-			if len(cols) == 0 {
-				cols, err = mysqlColumnNames(task.SourceDB, mapping.SourceTable)
-				if err != nil {
-					return current, err
-				}
-				columns[mapping.SourceTable] = cols
+			cols, err := mysqlBinlogEventColumns(task.SourceDB, mapping.SourceTable, int(e.ColumnCount), columns)
+			if err != nil {
+				return current, err
 			}
 			switch event.Header.EventType {
 			case replication.WRITE_ROWS_EVENTv1, replication.WRITE_ROWS_EVENTv2:
