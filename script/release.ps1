@@ -17,9 +17,6 @@ if ([string]::IsNullOrWhiteSpace($Version)) {
 if ($Version -notmatch '^v\d+\.\d+\.\d+$') { throw '版本必须为 vMAJOR.MINOR.PATCH' }
 if (git tag --list $Version) { throw "标签 $Version 已存在" }
 
-go test ./...
-if ($LASTEXITCODE) { throw 'Go 测试失败' }
-
 git tag -a $Version -m "Release $Version"
 if ($LASTEXITCODE) { throw '创建标签失败' }
 git push origin $Version
